@@ -66,3 +66,4 @@ const IntegrationLogSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model('IntegrationLog', IntegrationLogSchema);
+

@@ -1,23 +1,25 @@
 {
   "name": "crm_zoho_books",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Enterprise CRM and Zoho Books Direct Integration",
+  "main": "server/src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server/src/server.js",
+    "test": "node --test tests/phase1.test.js",
+    "setup:hubspot": "node scripts/setupHubSpotProperties.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^18.0.9",
-    "express": "^5.3.0",
-    "mongoose": "^9.11.4",
-    "morgan": "^1.12.1"
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "mongoose": "^9.0.0",
+    "morgan": "^1.10.1"
   },
   "devDependencies": {
-    "supertest": "^7.3.1"
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.2.2"
   }
 }

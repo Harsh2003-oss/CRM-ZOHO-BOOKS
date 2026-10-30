@@ -140,3 +140,4 @@ if (require.main === module) {
 }
 
 module.exports = { setupProperties, requiredProperties };
+

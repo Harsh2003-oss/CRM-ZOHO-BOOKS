@@ -44,9 +44,7 @@ const MilestoneInvoiceSchema = new mongoose.Schema(
     zohoInvoiceId: {
       type: String,
       default: null,
-      unique: true,
-      sparse: true,
-      index: true
+      trim: true
     },
     zohoInvoiceNumber: {
       type: String,
@@ -78,5 +76,11 @@ const MilestoneInvoiceSchema = new mongoose.Schema(
 
 // Compound Unique Index: A deal can only ever have ONE record per milestone index
 MilestoneInvoiceSchema.index({ crmDealId: 1, milestoneIndex: 1 }, { unique: true });
+
+// Optional Unique Index for zohoInvoiceId only when it is a non-null string
+MilestoneInvoiceSchema.index(
+  { zohoInvoiceId: 1 },
+  { unique: true, partialFilterExpression: { zohoInvoiceId: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('MilestoneInvoice', MilestoneInvoiceSchema);

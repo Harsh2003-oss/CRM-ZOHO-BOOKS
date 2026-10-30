@@ -29,9 +29,7 @@ const IntegrationSyncSchema = new mongoose.Schema(
     zohoSalesOrderId: {
       type: String,
       default: null,
-      unique: true,
-      sparse: true,
-      index: true
+      trim: true
     },
     zohoSalesOrderNumber: {
       type: String,
@@ -99,6 +97,11 @@ const IntegrationSyncSchema = new mongoose.Schema(
   {
     timestamps: true
   }
+);
+
+IntegrationSyncSchema.index(
+  { zohoSalesOrderId: 1 },
+  { unique: true, partialFilterExpression: { zohoSalesOrderId: { $type: 'string' } } }
 );
 
 module.exports = mongoose.model('IntegrationSync', IntegrationSyncSchema);
