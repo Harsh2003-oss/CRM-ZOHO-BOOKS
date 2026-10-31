@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const healthRoutes = require('./routes/healthRoutes');
+const webhookRoutes = require('./routes/webhookRoutes');
 
 const app = express();
 
@@ -17,12 +18,12 @@ app.use((req, res, next) => {
       console.log(`[HTTP] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
     }
   });
-  next;
   next();
 });
 
 // Mount Routes
 app.use('/api', healthRoutes);
+app.use('/api/webhooks', webhookRoutes);
 
 // Root route
 app.get('/', (req, res) => {
