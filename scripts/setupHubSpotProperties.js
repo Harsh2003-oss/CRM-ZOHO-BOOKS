@@ -3,6 +3,13 @@ const { hubspotClient } = require('../server/src/clients/hubspotClient');
 
 const requiredProperties = [
   {
+    name: 'zoho_customer_id',
+    label: 'Zoho Customer ID',
+    type: 'string',
+    fieldType: 'text',
+    groupName: 'dealinformation'
+  },
+  {
     name: 'zoho_sales_order_id',
     label: 'Zoho Sales Order ID',
     type: 'string',
@@ -31,8 +38,29 @@ const requiredProperties = [
     groupName: 'dealinformation'
   },
   {
+    name: 'zoho_currency_code',
+    label: 'Zoho Currency Code',
+    type: 'string',
+    fieldType: 'text',
+    groupName: 'dealinformation'
+  },
+  {
+    name: 'zoho_total_invoiced_amount',
+    label: 'Zoho Total Invoiced Amount',
+    type: 'number',
+    fieldType: 'number',
+    groupName: 'dealinformation'
+  },
+  {
     name: 'zoho_percentage_invoiced',
     label: 'Zoho Percentage Invoiced',
+    type: 'number',
+    fieldType: 'number',
+    groupName: 'dealinformation'
+  },
+  {
+    name: 'zoho_total_collected_amount',
+    label: 'Zoho Total Collected Amount',
     type: 'number',
     fieldType: 'number',
     groupName: 'dealinformation'
@@ -73,6 +101,13 @@ const requiredProperties = [
     groupName: 'dealinformation'
   },
   {
+    name: 'zoho_payment_status',
+    label: 'Zoho Payment Status',
+    type: 'string',
+    fieldType: 'text',
+    groupName: 'dealinformation'
+  },
+  {
     name: 'integration_sync_status',
     label: 'Integration Sync Status',
     type: 'string',
@@ -91,6 +126,27 @@ const requiredProperties = [
     label: 'Integration Milestone Stage',
     type: 'string',
     fieldType: 'text',
+    groupName: 'dealinformation'
+  },
+  {
+    name: 'integration_last_synced_at',
+    label: 'Integration Last Synced At',
+    type: 'string',
+    fieldType: 'text',
+    groupName: 'dealinformation'
+  },
+  {
+    name: 'confirmed_go_live_date',
+    label: 'Confirmed Go-Live Date',
+    type: 'date',
+    fieldType: 'date',
+    groupName: 'dealinformation'
+  },
+  {
+    name: 'm3_eligible_date',
+    label: 'M3 Eligible Date',
+    type: 'date',
+    fieldType: 'date',
     groupName: 'dealinformation'
   }
 ];

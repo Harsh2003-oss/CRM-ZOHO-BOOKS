@@ -50,11 +50,34 @@ const MilestoneInvoiceSchema = new mongoose.Schema(
       type: String,
       default: null
     },
+    zohoSalesOrderId: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    zohoSalesOrderItemId: {
+      type: String,
+      default: null,
+      trim: true
+    },
+    currencyCode: {
+      type: String,
+      default: 'AED'
+    },
+    referenceNumber: {
+      type: String,
+      default: null,
+      trim: true
+    },
     status: {
       type: String,
-      enum: ['PENDING_TRIGGER', 'CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID', 'VOIDED'],
+      enum: ['PENDING_TRIGGER', 'PENDING_RECONCILIATION', 'FAILED_VALIDATION', 'CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID', 'VOIDED'],
       default: 'PENDING_TRIGGER',
       index: true
+    },
+    failureReason: {
+      type: String,
+      default: null
     },
     balance: {
       type: Number,

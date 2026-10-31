@@ -5,10 +5,13 @@
   "main": "server/src/server.js",
   "scripts": {
     "start": "node server/src/server.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "test:step2-1": "node scripts/simulateHubSpotWebhook.js",
     "test:step3-1": "node scripts/testCustomerMatching.js",
     "test:step3-2": "node scripts/verifySalesOrderWorkflow.js",
+    "test:step3-3": "node --test tests/phase3_invoice.test.js",
+    "test:step3-4": "node --test tests/phase3_orchestration.test.js",
+    "test:step3-5": "node --test tests/phase3_step5_milestones.test.js",
     "setup:hubspot": "node scripts/setupHubSpotProperties.js"
   },
   "keywords": [],

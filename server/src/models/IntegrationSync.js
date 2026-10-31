@@ -31,6 +31,11 @@ const IntegrationSyncSchema = new mongoose.Schema(
       default: null,
       trim: true
     },
+    zohoSalesOrderLineItemId: {
+      type: String,
+      default: null,
+      trim: true
+    },
     zohoSalesOrderNumber: {
       type: String,
       default: null
@@ -69,17 +74,42 @@ const IntegrationSyncSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+    orchestrationLockedBy: {
+      type: String,
+      default: null
+    },
+    orchestrationLockedAt: {
+      type: Date,
+      default: null
+    },
+    orchestrationLeaseExpiresAt: {
+      type: Date,
+      default: null
+    },
     currencyCode: {
       type: String,
       default: 'AED'
     },
+    totalInvoicedAmount: {
+      type: Number,
+      default: 0
+    },
     percentageInvoiced: {
+      type: Number,
+      default: 0
+    },
+    amountCollected: {
       type: Number,
       default: 0
     },
     percentageCollected: {
       type: Number,
       default: 0
+    },
+    paymentInfoStatus: {
+      type: String,
+      enum: ['DETERMINED', 'PAYMENT_INFO_UNAVAILABLE'],
+      default: 'DETERMINED'
     },
     amountInvoicedUnpaid: {
       type: Number,
@@ -97,11 +127,49 @@ const IntegrationSyncSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    confirmedGoLiveDate: {
+      type: Date,
+      default: null
+    },
+    goLiveVerifiedAt: {
+      type: Date,
+      default: null
+    },
+    m3EligibleAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
     syncStatus: {
       type: String,
-      enum: ['PENDING', 'PROCESSING', 'REQUIRES_MANUAL_MATCH', 'SALES_ORDER_DRAFT', 'SALES_ORDER_CONFIRMED', 'SYNCED', 'FAILED'],
+      enum: [
+        'PENDING',
+        'PROCESSING',
+        'REQUIRES_MANUAL_MATCH',
+        'SALES_ORDER_DRAFT',
+        'SALES_ORDER_CONFIRMED',
+        'M1_INVOICED',
+        'M2_INVOICED',
+        'M3_INVOICED',
+        'HUBSPOT_SYNC_FAILED',
+        'RECONCILIATION_REQUIRED',
+        'SYNCED',
+        'FAILED'
+      ],
       default: 'PENDING',
       index: true
+    },
+    reconciliationMilestoneIndex: {
+      type: Number,
+      default: null
+    },
+    reconciliationReason: {
+      type: String,
+      default: null
+    },
+    reconciliationRequestedAt: {
+      type: Date,
+      default: null
     },
     failureReason: {
       type: String,

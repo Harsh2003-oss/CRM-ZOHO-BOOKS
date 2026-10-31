@@ -156,7 +156,7 @@ class SalesOrderService {
     // Step 0: Check idempotency before acquiring lock (return cached result immediately)
     const existingSync = await IntegrationSync.findOne({ crmDealId });
     if (existingSync && existingSync.salesOrderStatus === 'CONFIRMED' && existingSync.zohoSalesOrderId) {
-      if (existingSync.syncStatus !== 'SALES_ORDER_CONFIRMED') {
+      if (['PENDING', 'PROCESSING', 'SALES_ORDER_DRAFT'].includes(existingSync.syncStatus)) {
         await IntegrationSync.updateOne(
           { crmDealId },
           { $set: { syncStatus: 'SALES_ORDER_CONFIRMED' } }
@@ -379,26 +379,32 @@ class SalesOrderService {
       const actualTax = actualTaxMinor / 100;
       const actualGross = actualGrossMinor / 100;
 
+      const lineItemId = targetSO.line_items?.[0]?.line_item_id || null;
+
       // Step 3: Save draft Sales Order ID and status in MongoDB with FENCING GUARD
+      const draftSet = {
+        zohoSalesOrderId: targetSO.salesorder_id,
+        zohoSalesOrderNumber: targetSO.salesorder_number,
+        zohoSalesOrderUrl: `https://books.zoho.${process.env.ZOHO_BOOKS_DOMAIN || 'in'}/app/${process.env.ZOHO_BOOKS_ORGANIZATION_ID}#/salesorders/${targetSO.salesorder_id}`,
+        salesOrderTotal: actualGross,
+        salesOrderSubtotal: actualSubtotal,
+        salesOrderTax: actualTax,
+        salesOrderStatus: 'DRAFT',
+        syncStatus: 'SALES_ORDER_DRAFT',
+        currencyCode: actualCurrency
+      };
+
+      if (lineItemId) {
+        draftSet.zohoSalesOrderLineItemId = lineItemId;
+      }
+
       const draftSync = await IntegrationSync.findOneAndUpdate(
         {
           crmDealId,
           lockedBy: executionWorkerId,
           leaseExpiresAt: { $gt: new Date() }
         },
-        {
-          $set: {
-            zohoSalesOrderId: targetSO.salesorder_id,
-            zohoSalesOrderNumber: targetSO.salesorder_number,
-            zohoSalesOrderUrl: `https://books.zoho.${process.env.ZOHO_BOOKS_DOMAIN || 'in'}/app/${process.env.ZOHO_BOOKS_ORGANIZATION_ID}#/salesorders/${targetSO.salesorder_id}`,
-            salesOrderTotal: actualGross,
-            salesOrderSubtotal: actualSubtotal,
-            salesOrderTax: actualTax,
-            salesOrderStatus: 'DRAFT',
-            syncStatus: 'SALES_ORDER_DRAFT',
-            currencyCode: actualCurrency
-          }
-        },
+        { $set: draftSet },
         { returnDocument: 'after' }
       );
 
@@ -461,6 +467,7 @@ class SalesOrderService {
         status: 'CONFIRMED',
         zohoSalesOrderId: targetSO.salesorder_id,
         zohoSalesOrderNumber: targetSO.salesorder_number,
+        zohoSalesOrderLineItemId: lineItemId,
         salesOrderTotal: actualGross,
         salesOrderSubtotal: actualSubtotal,
         salesOrderTax: actualTax,

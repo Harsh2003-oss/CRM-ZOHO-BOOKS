@@ -57,8 +57,14 @@ class WebhookService {
       const propName = event.propertyName || 'dealstage';
       const propValue = String(event.propertyValue || event.dealstage || '').toLowerCase().trim();
 
-      // We only initiate the Zoho workflow when stage is Closed Won
+      // We initiate workflow for Closed Won deals (M1) or Go-Live confirmation events (M2)
       const isClosedWon = propName === 'dealstage' && (propValue === 'closedwon' || propValue === 'closed won');
+      const isGoLiveEvent =
+        propName === 'confirmed_go_live_date' ||
+        propName === 'go_live_date' ||
+        (propName === 'milestone_stage' && (propValue === 'go_live_reached' || propValue === 'm2_go_live' || propValue === 'go-live'));
+
+      const isActionable = isClosedWon || isGoLiveEvent;
 
       // Check for duplicate in WebhookEvent
       const existing = await WebhookEvent.findOne({ eventId });
@@ -67,7 +73,7 @@ class WebhookService {
         continue;
       }
 
-      if (!isClosedWon) {
+      if (!isActionable) {
         // Save as IGNORED so we maintain an audit trail without queueing work
         try {
           await WebhookEvent.create({
