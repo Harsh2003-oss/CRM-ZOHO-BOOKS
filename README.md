@@ -2,7 +2,7 @@
 
 An enterprise-grade, bi-directional integration gateway connecting **HubSpot CRM** and **Zoho Books**. The system automates the transition from Closed Won CRM deals into confirmed Sales Orders, orchestrates multi-milestone progressive invoicing (50% on signing, 30% at go-live, 20% at 90 days), and synchronizes real-time payment collections back to CRM financial metrics.
 
-Includes an operational monitoring dashboard built with **React 18 + Vite + Tailwind CSS** featuring collections aging, real-time audit logging, and an operator exception resolution center.
+Includes an operational monitoring dashboard built with **React 18 + Vite + Tailwind CSS** featuring collections aging, real-time audit logging, an operator exception resolution center, and a dedicated public webhook ingress gateway.
 
 ---
 
@@ -10,17 +10,22 @@ Includes an operational monitoring dashboard built with **React 18 + Vite + Tail
 1. [Business Problem & Solution Overview](#business-problem--solution-overview)
 2. [Architecture & Technology Stack](#architecture--technology-stack)
 3. [Architecture Diagram](#architecture-diagram)
-4. [Completed Phases & Key Capabilities](#completed-phases--key-capabilities)
-5. [Prerequisites & Environment Configuration](#prerequisites--environment-configuration)
-6. [OAuth Setup Guides (HubSpot & Zoho Books)](#oauth-setup-guides-hubspot--zoho-books)
-7. [Installation & Execution Guide](#installation--execution-guide)
-8. [Loading Demo Dataset](#loading-demo-dataset)
-9. [Automated Testing Suite](#automated-testing-suite)
-10. [Dashboard & API Documentation](#dashboard--api-documentation)
-11. [Idempotency & Crash Recovery Strategy](#idempotency--crash-recovery-strategy)
-12. [Security & Sanitization](#security--sanitization)
-13. [External Account Facts & Known Limitations](#external-account-facts--known-limitations)
-14. [Submission Documentation Index](#submission-documentation-index)
+4. [End-to-End Sequence Diagram (Closed Won to Paid)](#end-to-end-sequence-diagram-closed-won-to-paid)
+5. [Completed Phases & Key Capabilities](#completed-phases--key-capabilities)
+6. [Product Catalog Mapping (Never Guess an Item)](#product-catalog-mapping-never-guess-an-item)
+7. [Field Mapping Specification & System of Record](#field-mapping-specification--system-of-record)
+8. [The Seven Core Engineering Scenarios](#the-seven-core-engineering-scenarios)
+9. [Public Ingress Gateway & Permanent Production Deployment](#public-ingress-gateway--permanent-production-deployment)
+10. [Prerequisites & Environment Configuration](#prerequisites--environment-configuration)
+11. [OAuth Setup Guides (HubSpot & Zoho Books)](#oauth-setup-guides-hubspot--zoho-books)
+12. [Installation & Execution Guide](#installation--execution-guide)
+13. [Loading Demo Dataset](#loading-demo-dataset)
+14. [Automated Testing Suite](#automated-testing-suite)
+15. [Dashboard & API Documentation](#dashboard--api-documentation)
+16. [Idempotency & Crash Recovery Strategy](#idempotency--crash-recovery-strategy)
+17. [Security & Sanitization](#security--sanitization)
+18. [External Account Facts & Known Limitations](#external-account-facts--known-limitations)
+19. [Submission Documentation Index](#submission-documentation-index)
 
 ---
 
@@ -38,6 +43,7 @@ A decoupled, asynchronous integration gateway providing:
 - **Reverse Payment Sync**: Synchronizes full payments, partial payments, reversals, and refunds with integer minor-unit arithmetic.
 - **Pre-Flight Deterministic Reconciliation**: Prevents duplicate records by querying deterministic reference numbers (`CRM_{dealId}_M{index}`) before retrying uncertain network calls.
 - **Operator Action Center**: Human-in-the-loop exception resolution for ambiguous customer mappings and remote sync recoveries.
+- **Strict Ingress Isolation**: Separates public webhook reception from internal dashboard and operator APIs.
 
 ---
 
@@ -46,11 +52,12 @@ A decoupled, asynchronous integration gateway providing:
 | Layer | Technologies | Key Highlights |
 | :--- | :--- | :--- |
 | **Frontend** | React 18.3.1, Vite 5.4.11, Tailwind CSS 3.4.17 | Single-page application, zero external CDNs, tabbed routing, modal dialogs |
-| **Backend Gateway** | Node.js (v24), Express 5.2.1 | Non-blocking async webhook ingestion, regex static asset serving |
+| **Backend Gateway** | Node.js (v24), Express 5.2.1 | Non-blocking async webhook ingestion, regex static asset serving, reverse-proxy trust |
+| **Ingress Proxy** | Node.js Native HTTP Proxy (`scripts/webhookIngressGateway.js`) | Filters public traffic, exposes only webhooks, protects dashboard/operator APIs |
 | **Persistence** | MongoDB, Mongoose 9.0 | Unique partial indexes, compound constraints, atomic lease locking |
 | **Queue & Workers** | MongoDB Durable FIFO Queue | Distributed lease timeouts, fencing tokens, exponential jittered backoff |
 | **Integrations** | HubSpot CRM API v3, Zoho Books API v3 | Multi-region OAuth auto-refresher (5-min pre-expiry), Token Bucket limiter |
-| **Testing** | Node.js Native Test Runner (`node:test`), Supertest | 203 tests across 14 suites with in-memory MongoDB |
+| **Testing** | Node.js Native Test Runner (`node:test`), Supertest | 209 tests across 15 suites with in-memory MongoDB |
 
 ---
 
@@ -58,6 +65,12 @@ A decoupled, asynchronous integration gateway providing:
 
 ```mermaid
 flowchart TB
+    subgraph IngressTier ["Public Ingress & Security Boundary"]
+        INGRESS["Public Ingress Gateway (:5001)<br/>(webhookIngressGateway.js)"]
+        CLOUDFLARE["Public Reverse Proxy / Cloudflare / ALB"]
+        CLOUDFLARE -->|HTTPS Only| INGRESS
+    end
+
     subgraph ClientTier ["Frontend & Presentation Tier (client/)"]
         UI["React 18 + Vite SPA<br/>(Tailwind CSS)"]
         OV["Financial Overview & KPI Cards"]
@@ -80,6 +93,7 @@ flowchart TB
         
         ORCH["Orchestration Engine (orchestrationService.js)"]
         CUST_SVC["Customer Matching Service (Exact, Auto, Ambiguous)"]
+        PROD_SVC["Product Service (Catalog Resolution, Never Guess)"]
         SO_SVC["Sales Order Service (Draft, Confirm, Line Item)"]
         INV_SVC["Milestone Invoicing Service (M1: 50%, M2: 30%, M3: 20%)"]
         PAY_SVC["Payment & Refund Service (Integer Cents, Reversals)"]
@@ -89,6 +103,7 @@ flowchart TB
         RATE_LIMITER["Token Bucket Rate Limiter (100 req/min Zoho)"]
         RECON["Deterministic Pre-Flight Reconciler (CRM_{dealId}_M{index})"]
 
+        INGRESS -->|Forward Webhooks Only| WH_INGEST
         EXP --> PROXY
         PROXY --> UI
         EXP --> AUTH_MW
@@ -97,6 +112,7 @@ flowchart TB
         QUEUE --> ORCH
         
         ORCH --> CUST_SVC
+        ORCH --> PROD_SVC
         ORCH --> SO_SVC
         ORCH --> INV_SVC
         ORCH --> PAY_SVC
@@ -113,6 +129,7 @@ flowchart TB
         M_SYNC["IntegrationSync"]
         M_INV["MilestoneInvoice"]
         M_CUST["CustomerMapping"]
+        M_PROD["ProductMapping"]
         M_PAY["PaymentRecord"]
         M_LOG["IntegrationLog"]
         
@@ -120,6 +137,7 @@ flowchart TB
         DB --- M_SYNC
         DB --- M_INV
         DB --- M_CUST
+        DB --- M_PROD
         DB --- M_PAY
         DB --- M_LOG
     end
@@ -131,10 +149,11 @@ flowchart TB
         ZB_WH["Zoho Books Payment Webhooks"]
     end
 
-    HS_WH -->|Inbound Webhook HTTP 202| WH_INGEST
-    ZB_WH -->|Inbound Webhook HTTP 202| WH_INGEST
+    HS_WH -->|Inbound Webhook HTTPS| CLOUDFLARE
+    ZB_WH -->|Inbound Webhook HTTPS| CLOUDFLARE
     
     CUST_SVC <-->|REST API| ZB
+    PROD_SVC <-->|REST API| ZB
     SO_SVC <-->|REST API| ZB
     INV_SVC <-->|REST API| ZB
     PAY_SVC <-->|REST API| ZB
@@ -143,6 +162,79 @@ flowchart TB
     ORCH <--> DB
     DASH_SVC <--> DB
     QUEUE <--> DB
+```
+
+---
+
+## End-to-End Sequence Diagram (Closed Won to Paid)
+
+The diagram below traces a contract worth **AED 120,000 + 5% VAT (AED 126,000 gross)** from the moment a sales representative closes the deal in HubSpot CRM, through Sales Order confirmation and Milestone 1 invoicing in Zoho Books, to payment recording and bidirectional CRM reverse-sync.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Rep as Sales Rep (HubSpot)
+    participant HS as HubSpot CRM API
+    participant Ingress as Public Ingress (:5001)
+    participant GW as API Server (:5000)
+    participant DB as MongoDB (crm_zoho_db)
+    participant Worker as Queue Worker (Background)
+    participant ZB as Zoho Books API
+    participant Finance as Finance Team (Zoho Books)
+
+    Note over Rep,HS: 1. Deal Transitions to Closed Won
+    Rep->>HS: Moves Deal to "Closed Won" (AED 120,000)
+    HS->>Ingress: POST /api/webhooks/hubspot (dealstage = closedwon)
+    Ingress->>GW: Forward byte-stream (preserving X-HubSpot-Signature-v3)
+    GW->>DB: Upsert WebhookEvent (status: RECEIVED) & IntegrationSync (status: PENDING)
+    GW-->>HS: HTTP 202 Accepted (< 50ms)
+
+    Note over Worker,DB: 2. Background Queue Processing
+    Worker->>DB: Atomically claim next event lease (status: PROCESSING)
+    Worker->>HS: GET /crm/v3/objects/deals/{id}?associations=companies,contacts,line_items
+    HS-->>Worker: Deal details (Amount: AED 120,000, Company: NovaTech)
+
+    Note over Worker,ZB: 3. Customer & Product Resolution
+    Worker->>ZB: CustomerService.resolveCustomer() (Search by email/company)
+    alt Exactly 1 match or 0 matches (auto-created)
+        ZB-->>Worker: Resolved zohoContactId
+    else Multiple matches (>1)
+        Worker->>DB: Flag syncStatus: REQUIRES_MANUAL_MATCH
+        Worker-->>HS: Push integration_sync_status: REQUIRES_MANUAL_MATCH
+    end
+
+    Worker->>ZB: ProductService.resolveProduct() (Catalog lookup by SKU/name)
+    Note over Worker: Never guess an item! Strict resolution or fail-safe default.
+    ZB-->>Worker: Resolved zohoItemId (Cloud Platform License)
+
+    Note over Worker,ZB: 4. Sales Order & M1 Invoicing (50% Signing)
+    Worker->>ZB: Pre-flight check GET /salesorders?reference_number=CRM_{id}
+    Worker->>ZB: POST /salesorders (Line items: Subtotal 120k, Tax 6k, Gross 126k AED)
+    ZB-->>Worker: Draft SO created (ID: so_001)
+    Worker->>ZB: POST /salesorders/{id}/status/confirmed
+    Worker->>DB: Update IntegrationSync (salesOrderStatus: CONFIRMED)
+
+    Worker->>ZB: Pre-flight check GET /invoices?reference_number=CRM_{id}_M1
+    Worker->>ZB: POST /invoices (50% Signing: Rate 60k, Tax 3k, Gross 63k AED)
+    ZB-->>Worker: Draft Invoice created (ID: inv_m1)
+    Worker->>ZB: POST /invoices/{id}/status/sent
+    Worker->>DB: Save MilestoneInvoice (M1: SENT, balance: 63,000)
+
+    Note over Worker,HS: 5. Synchronize Initial State to HubSpot
+    Worker->>HS: PATCH /crm/v3/objects/deals/{id}
+    Note over HS: Written: zoho_sales_order_id, zoho_sales_order_total (126,000),<br/>zoho_total_invoiced (63,000), zoho_percentage_invoiced (50%),<br/>zoho_invoiced_unpaid (63,000), zoho_not_invoiced (63,000)
+
+    Note over Finance,ZB: 6. Payment Received in Zoho Books
+    Finance->>ZB: Record Customer Payment of AED 63,000 against M1
+    ZB->>Ingress: POST /api/webhooks/zoho (customerpayment)
+    Ingress->>GW: Forward payment payload
+    GW->>DB: Upsert WebhookEvent (status: RECEIVED)
+    GW-->>ZB: HTTP 202 Accepted (< 50ms)
+
+    Note over Worker,HS: 7. Reverse Payment Sync to CRM
+    Worker->>DB: Claim payment event & update invoice balance to 0
+    Worker->>HS: PATCH /crm/v3/objects/deals/{id}
+    Note over HS: Updated: zoho_total_collected (63,000),<br/>zoho_percentage_collected (50%), zoho_invoiced_unpaid (0.00),<br/>zoho_is_overdue ("false")
 ```
 
 ---
@@ -156,9 +248,12 @@ flowchart TB
   - Deep `/api/health` check verifying live external connectivity.
 - **Phase 2: Webhook Ingestion & Durable Queue**
   - High-throughput webhook reception (`< 50ms`, HTTP 202).
+  - Production-ready HubSpot Signature v3 HMAC-SHA256 verification with RFC percent-encoding normalization and 5-minute replay prevention window.
   - Durable FIFO queue with distributed atomic lease expiration and crash recovery.
+  - Dedicated public ingress gateway script (`scripts/webhookIngressGateway.js`).
 - **Phase 3: CRM to Zoho Books (Sales Orders & Milestone Invoicing)**
   - Rule-based customer matching (`AUTOMATIC_EXACT`, `AUTO_CREATED`, `AMBIGUOUS`).
+  - Strict product catalog mapping (`ProductService`): Resolves CRM products to Zoho items without guessing.
   - Draft Sales Order creation, tax calculation, and confirmation.
   - Milestone 1 (50% on signing) raised against confirmed Sales Order line item.
   - Milestone 2 (30% at verified go-live) and Milestone 3 (20% at 90 days post go-live) lifecycle enforcement.
@@ -173,6 +268,151 @@ flowchart TB
 - **Phase 6: Seed Dataset & Comprehensive Submission Deliverables**
   - Idempotent seed script with 16 customers and 23 deals covering all realistic financial states.
   - Complete architectural, sequence, field-mapping, deployment, and scenario documentation.
+
+---
+
+## Product Catalog Mapping (Never Guess an Item)
+
+Requirement 3 of the specification states: **"Map the CRM deal's products to Zoho Books items. Never guess an item."**
+
+To enforce this, the gateway implements `ProductService` backed by the `ProductMapping` MongoDB collection:
+
+```mermaid
+flowchart TD
+    A["HubSpot Deal Line Item / Product"] --> B{"Local ProductMapping<br/>Cache in MongoDB?"}
+    B -->|Active Mapping Found| C["Use Cached Zoho Item ID<br/>(fromCache: true)"]
+    B -->|Ambiguous Mapping| D["HALT: REQUIRES_MANUAL_MATCH<br/>(Flag Human Decision)"]
+    B -->|Not Cached| E["Query Zoho Books Catalog<br/>GET /items?sku=... / name=..."]
+
+    E -->|Exactly 1 Match| F["Save AUTOMATIC_EXACT<br/>to ProductMapping (Active)"]
+    E -->|> 1 Matches| G["Save AMBIGUOUS with Candidate List<br/>HALT: REQUIRES_MANUAL_MATCH"]
+    E -->|0 Matches| H{"DEFAULT_ZOHO_ITEM_ID<br/>Configured in .env?"}
+
+    H -->|Yes| I["Use Explicit Default Item<br/>(CONFIGURED_DEFAULT)"]
+    H -->|No| J["Save UNMAPPED to DB<br/>HALT: REQUIRES_MANUAL_MATCH<br/>Never Guess an Item!"]
+```
+
+### Key Safety Invariants:
+1. **Zero Guessing**: If a CRM deal specifies a product or line item that cannot be resolved in Zoho Books, the process immediately halts with `syncStatus: "REQUIRES_MANUAL_MATCH"`, notifies HubSpot, and prevents creation of an unverified Sales Order.
+2. **Ambiguity Protection**: If multiple catalog items share similar names, the candidates are captured in `ProductMapping.candidateMatches` for operator selection.
+3. **Local Cache First**: Once an item is mapped, subsequent deals reuse the verified mapping without wasting Zoho API quota.
+4. **Environment Fallback**: Organizations with standardized service contracts can configure `DEFAULT_ZOHO_ITEM_ID` in `.env` to supply a verified default catalog item when CRM deals do not carry granular line-item records.
+
+---
+
+## Field Mapping Specification & System of Record
+
+### 1. Customer & Company Mapping
+| HubSpot Field | Zoho Books Field | System of Record | Direction | Rule / Transformation |
+| :--- | :--- | :--- | :--- | :--- |
+| `company.name` | `company_name` | HubSpot | CRM → Zoho | Primary lookup; trimmed |
+| `contact.firstname` + `lastname` | `contact_persons[0].first_name` / `last_name` | HubSpot | CRM → Zoho | Split or default 'Contact' |
+| `contact.email` | `contact_persons[0].email` | HubSpot | CRM → Zoho | Lowercased; secondary match key |
+| `company.id` / `contact.id` | `notes` | HubSpot | CRM → Zoho | Traceability reference stored in Zoho |
+| — | `contact_id` | Zoho Books | Zoho → CRM | Stored in `CustomerMapping.zohoContactId` |
+
+### 2. Deal to Sales Order & Invoices
+| HubSpot Deal Field | Zoho Books Field | System of Record | Direction | Rule / Transformation |
+| :--- | :--- | :--- | :--- | :--- |
+| `deal.dealname` | `reference_number` | HubSpot | CRM → Zoho | Prefixed: `CRM_{dealId}` (Idempotency key) |
+| `deal.amount` | `salesorders.line_items[0].rate` | HubSpot | CRM → Zoho | Total contract subtotal (e.g. AED 120,000) |
+| — | `salesorders.currency_code` | Gateway | CRM → Zoho | Controlled by `DEFAULT_CURRENCY` (`AED`) |
+| `dealstage = closedwon` | `invoices.reference_number` | HubSpot | CRM → Zoho | Triggers **M1** (50%): `CRM_{dealId}_M1` |
+| `confirmed_go_live_date` | `invoices.reference_number` | HubSpot | CRM → Zoho | Triggers **M2** (30%): `CRM_{dealId}_M2` |
+| Current date ≥ `GoLive + 90d` | `invoices.reference_number` | Integration | Internal → Zoho | Triggers **M3** (20%): `CRM_{dealId}_M3` |
+
+### 3. Zoho Books to CRM Reverse Sync (Financial Properties)
+The gateway updates **only custom properties owned by this integration**, never overwriting core HubSpot sales fields:
+| HubSpot Custom Property | Type | Zoho Books Source | Transformation / Formula |
+| :--- | :--- | :--- | :--- |
+| `zoho_sales_order_id` | `string` | `salesorder.salesorder_id` | Direct mapping upon confirmation |
+| `zoho_sales_order_number` | `string` | `salesorder.salesorder_number` | Formatted order number (e.g. `SO-00002`) |
+| `zoho_sales_order_total` | `number` | `salesorder.total` | Total confirmed gross amount |
+| `zoho_total_invoiced_amount` | `number` | $\sum \text{Active Invoices Total}$ | Integer minor-unit sum across M1, M2, M3 |
+| `zoho_percentage_invoiced` | `number` | $(\text{Total Invoiced} / \text{SO Total}) \times 100$ | $50.0\% \rightarrow 80.0\% \rightarrow 100.0\%$ |
+| `zoho_amount_collected` | `number` | $\sum \text{Customer Payments Applied}$ | Integer minor-unit realized cash |
+| `zoho_percentage_collected` | `number` | $(\text{Collected} / \text{SO Total}) \times 100$ | Cash realization percentage |
+| `zoho_amount_invoiced_unpaid` | `number` | $\text{Total Invoiced} - \text{Total Collected}$ | Real-time outstanding AR balance |
+| `zoho_amount_not_invoiced` | `number` | $\max(0, \text{SO Total} - \text{Total Invoiced})$ | Unbilled contract backlog |
+| `zoho_next_due_date` | `string` | $\min(\text{Due Date of Unpaid Invoices})$ | Formatted `YYYY-MM-DD` |
+| `zoho_is_overdue` | `string` | Calculated against UTC midnight | `"true"` if past due date with balance > 0 |
+
+---
+
+## The Seven Core Engineering Scenarios
+
+The assignment mandates addressing seven critical operational scenarios. Complete analyses with sequence flows and code citations are available in [`docs/scenarios.md`](file:///d:/CRM_ZOHO_BOOKS/docs/scenarios.md). Below is an executive summary of each:
+
+1. **Zoho Books is unreachable for 6 hours on the last day of the month**:
+   - Webhook ingestion immediately returns `HTTP 202 Accepted` (< 50ms), preserving HubSpot's dispatch queue.
+   - Events are persisted durably in MongoDB. The worker retries with exponential backoff and jitter ($T_{\text{wait}} = \min(T_{\max}, T_{\text{base}} \times 2^{\text{attempt}})$).
+   - When Zoho recovers, pre-flight deterministic reference queries (`CRM_{dealId}`) prevent duplicate creation.
+2. **Deal is reopened after first invoice was sent**:
+   - An issued tax invoice is a legal fiscal document; it is **never automatically deleted or voided**.
+   - Gateway locks downstream milestones (M2/M3) and flags the deal for human review.
+   - If the deal is re-won, M1 is recognized as already existing, and M2 eligibility resumes.
+3. **Deal amount changes after Sales Order exists but before second invoice**:
+   - The gateway refuses to guess or silently mutate line items.
+   - Comparing CRM `amount` to `salesOrderSubtotal` triggers `syncStatus: "RECONCILIATION_REQUIRED"` and halts M2/M3 generation until finance creates a formal Change Order or adjusts the remaining milestones.
+4. **CRM sends the same Closed Won event three times, out of order with an earlier stage change**:
+   - Deterministic event hashing (`hs_{dealId}_{prop}_{val}_{timestamp}`) and unique MongoDB indexes drop duplicate deliveries cleanly with `duplicates: 1`.
+   - The orchestrator fetches current deal state from HubSpot. If the live stage is no longer Closed Won, it exits safely (`SKIPPED_NOT_CLOSED_WON`) without altering Zoho.
+5. **Invoice is voided in Zoho Books and re-issued under a new number**:
+   - Zoho Books webhook notifies the gateway of the void event.
+   - Local `MilestoneInvoice` updates to `status: "VOIDED"`, recalculates total invoiced amount, and updates HubSpot properties to reflect the reduced invoiced amount.
+   - Re-issuance links back to the original milestone index, restoring financial alignment.
+6. **One payment is recorded against two invoices belonging to two different deals**:
+   - The payment payload's `invoices` array is decomposed into individual invoice applications.
+   - Each deal's financial metrics are updated independently using integer minor units, preventing cross-tenant balance pollution.
+7. **Daily Zoho Books API limit is reached in the afternoon**:
+   - Rate limiters and 429/over-quota handlers pause the queue worker.
+   - Inbound CRM webhooks continue to be ingested and persisted safely.
+   - Finance sees clear "API Quota Exceeded — Resuming at Midnight" status on the Dashboard without data loss.
+
+---
+
+## Public Ingress Gateway & Permanent Production Deployment
+
+Public webhooks must never expose internal administrative, operator, or dashboard endpoints to the public internet.
+
+```mermaid
+flowchart LR
+    A["Public Internet / HubSpot"] -->|HTTPS Webhooks Only| B["Public Ingress Gateway (:5001)<br/>(webhookIngressGateway.js)"]
+    B -->|Piped Raw Stream| C["Express Gateway (:5000)<br/>(127.0.0.1 Loopback)"]
+    D["Finance / Operator (VPN/LAN)"] -->|Authenticated Direct Access| C
+    B -.->|Block 404: /dashboard, /operator| E["Attack Surface Eliminated"]
+```
+
+### 1. Dedicated Public Ingress Gateway (`scripts/webhookIngressGateway.js`)
+- Listens on public ingress port (default: `5001`).
+- Strictly allowlists:
+  - `POST /api/webhooks/hubspot`
+  - `POST /api/webhooks/zoho`
+  - `GET /api/health`
+- Rejects all other methods and routes (`/api/dashboard`, `/api/operator`, etc.) with `HTTP 404`.
+- Pipes the byte stream directly to port 5000, preserving `req.rawBody` for HMAC Signature v3 validation.
+- Preserves `X-Forwarded-Host` and `X-Forwarded-Proto` for canonical URI reconstruction.
+
+### 2. Express Webhook-Only Mode (`WEBHOOK_INGRESS_ONLY=true`)
+When running containerized instances (e.g. AWS ECS, Render, or Railway), setting `WEBHOOK_INGRESS_ONLY=true` in the public container's environment tells `server/src/app.js` to mount only health and webhook routes, eliminating administrative exposure at the application layer.
+
+### 3. Production Deployment Reference (Nginx / ALB)
+In an enterprise deployment behind Nginx or AWS Application Load Balancer:
+```nginx
+# Public Webhook Location (Exposed to Internet)
+location /api/webhooks/ {
+    proxy_pass http://127.0.0.1:5000/api/webhooks/;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# Internal Dashboard (Restricted to Internal Corporate CIDR / VPN)
+location /dashboard/ {
+    allow 10.0.0.0/8;
+    deny all;
+    proxy_pass http://127.0.0.1:5000/dashboard/;
+}
+```
 
 ---
 
@@ -193,8 +433,11 @@ cp .env.example .env
 | Variable | Description | Example / Default |
 | :--- | :--- | :--- |
 | `PORT` | API Server listening port | `5000` |
+| `INGRESS_PORT` | Standalone public ingress gateway port | `5001` |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://localhost:27017/crm_zoho_dev` |
 | `HUBSPOT_ACCESS_TOKEN` | HubSpot Private App Access Token | `pat-na1-...` |
+| `HUBSPOT_CLIENT_SECRET` | HubSpot Client Secret for Signature v3 HMAC | `sec_hex...` |
+| `HUBSPOT_SIGNATURE_REQUIRED` | Enforce signature verification in non-prod | `false` |
 | `ZOHO_CLIENT_ID` | Zoho API Client ID | `1000.XXXX...` |
 | `ZOHO_CLIENT_SECRET` | Zoho API Client Secret | `yyyy...` |
 | `ZOHO_REFRESH_TOKEN` | Permanent Zoho OAuth Refresh Token | `1000.zzzz...` |
@@ -205,10 +448,10 @@ cp .env.example .env
 | `DEFAULT_CURRENCY` | Default Sales Order currency | `AED` |
 | `VAT_PERCENTAGE` | Configurable VAT percentage (`0` disables VAT line items; `5.0` default if unset) | `0` |
 | `ZOHO_UAE_VAT_TAX_ID` | Zoho Books tax entity ID for line item VAT (optional) | `your_vat_tax_id_here` |
-
-> [!IMPORTANT]
-> **Operator Authentication Security**:
-> In production (`NODE_ENV=production`), the Operator Action Center fails closed (HTTP 503) if `OPERATOR_API_KEY` is missing, empty, or set to an insecure default. An explicit dev key is permitted only in local development/testing (`NODE_ENV !== 'production'`). Never commit or hardcode production operator keys.
+| `DEFAULT_ZOHO_ITEM_ID` | Fallback Zoho Books catalog item ID | `your_zoho_item_id_here` |
+| `REQUIRE_PRODUCT_MAPPING`| Require explicit product mapping before SO creation | `false` |
+| `WEBHOOK_INGRESS_ONLY` | Restrict server instance to webhook routes only | `false` |
+| `TRUST_PROXY` | Express reverse-proxy trust (`1`, `true`, `loopback`) | `loopback` |
 
 ---
 
@@ -249,47 +492,43 @@ npm install
 npm install --prefix client
 ```
 
-### 2. Development Mode (Hot-Reloading)
-Run both the Express backend API and Vite React frontend concurrently:
+### 2. Build Frontend Dashboard
 ```bash
-npm run dev
+npm run build --prefix client
 ```
-- **Express Backend**: `http://localhost:5000`
-- **Vite React Dev Server**: `http://localhost:5173/dashboard/`
 
-### 3. Production Build & Execution
-Build the optimized React frontend and serve it statically through Express:
+### 3. Start Backend Integration Gateway
 ```bash
-npm run build
 npm start
 ```
-- Open `http://localhost:5000/dashboard/` in your browser.
+*Gateway runs on `http://localhost:5000`. Dashboard available at `http://localhost:5000/dashboard/`.*
+
+### 4. Start Standalone Public Webhook Ingress (Optional / Secure Ingress)
+```bash
+node scripts/webhookIngressGateway.js
+```
+*Listens on port `5001`, forwarding valid webhooks to port `5000` while blocking dashboard and operator routes.*
+
+### 5. Start Dedicated Queue Worker (Decoupled Background Execution)
+```bash
+WORKER_ENABLED=true npm run worker
+```
 
 ---
 
 ## Loading Demo Dataset
 
-To populate your database with a complete, idempotent demonstration dataset covering 16 customers and 23 deals across all financial states:
+Populate the database with a verified dataset satisfying Requirement 12 (>= 15 customers, >= 20 deals, fully and partly invoiced orders, partial payments, overdue invoices, and voided records):
 
 ```bash
 npm run seed
 ```
 
-This seeds:
-- 16 Customer Mappings (Active exact, auto-created, and ambiguous).
-- 23 CRM Deals and confirmed Sales Orders.
-- 33 Milestone Invoices (M1, M2, M3, voided, and overdue).
-- 23 Verified Payment Records with minor-unit accuracy.
-- Queued, processed, and failed webhook events.
-- Redacted audit log entries.
-
-*Note: Safe to re-run multiple times without duplicate record creation.*
-
 ---
 
 ## Automated Testing Suite
 
-The project includes 203 comprehensive tests across 14 suites executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
+The project includes **209 comprehensive automated tests across 15 suites** executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
 
 ```bash
 npm test
@@ -299,8 +538,9 @@ npm test
 | Suite File | Scope | Test Count |
 | :--- | :--- | :---: |
 | `tests/phase1.test.js` | Schema Constraints, OAuth Mutex, Rate Limiter, Health Check | 10 |
-| `tests/phase2_step1_webhook.test.js` | Webhook ingestion (<50ms), queue locking, deduplication, Signature v3 | 23 |
+| `tests/phase2_step1_webhook.test.js` | Webhook ingestion (<50ms), queue locking, deduplication, Signature v3, Ingress isolation | 24 |
 | `tests/phase3_customerMatching.test.js` | Customer matching rules (exact, auto-create, ambiguous) | 10 |
+| `tests/phase3_productMapping.test.js` | Product catalog mapping, exact match, ambiguous match, never guess | 5 |
 | `tests/phase3_invoice.test.js` | Sales Order linkage, M1 calculation, timeout reconciliation | 30 |
 | `tests/phase3_orchestration.test.js` | End-to-end HubSpot sync, string property casting, UTC date logic | 30 |
 | `tests/phase3_salesOrder.test.js` | Sales Order draft, confirmation, lease locks, crash recovery | 24 |
@@ -309,7 +549,7 @@ npm test
 | `tests/phase5_dashboard.test.js` | KPI calculation, 5 aging buckets, operator auth, Vite bundle | 16 |
 | `tests/phase6_seed.test.js` | Seed dataset verification, idempotency, production safeguard | 4 |
 | `tests/worker.test.js` | Dedicated Queue Worker, lease locking, fencing tokens, backoff | 13 |
-| **TOTAL VERIFIED TESTS** | **14 Test Suites Across 11 Test Files** | **203 Passed (0 Failed)** |
+| **TOTAL VERIFIED TESTS** | **15 Test Suites Across 12 Test Files** | **209 Passed (0 Failed)** |
 
 ---
 
@@ -327,7 +567,7 @@ npm test
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :---: |
 | `GET` | `/api/health` | Deep connectivity health check | No |
-| `POST` | `/api/webhooks/hubspot` | HubSpot deal change ingestion | No (< 50ms) |
+| `POST` | `/api/webhooks/hubspot` | HubSpot deal change ingestion | Signature v3 in Prod |
 | `POST` | `/api/webhooks/zoho` | Zoho Books payment/invoice ingestion | Yes (Token) |
 | `GET` | `/api/dashboard/summary` | Aggregated financial metrics | No |
 | `GET` | `/api/dashboard/collections` | Customer aging & unpaid balance table | No |
@@ -360,6 +600,8 @@ If a network timeout occurs while creating a Sales Order or Invoice in Zoho Book
    Sensitive operational actions (manual match override, event re-queue) require a valid `x-operator-key` header.
 3. **Fencing Tokens & Lease Expirations**:
    Workers maintain short-lived leases in MongoDB with fencing tokens, preventing split-brain execution across clustered servers.
+4. **Ingress Route Restriction**:
+   The standalone ingress proxy (`scripts/webhookIngressGateway.js`) blocks internal routes from public internet access.
 
 ---
 
@@ -393,4 +635,3 @@ Detailed documentation files in the [`docs/`](file:///d:/CRM_ZOHO_BOOKS/docs/) d
 - [docs/scenarios.md](file:///d:/CRM_ZOHO_BOOKS/docs/scenarios.md): Comprehensive answers to all 7 core assignment scenarios.
 - [docs/deployment.md](file:///d:/CRM_ZOHO_BOOKS/docs/deployment.md): Production cloud deployment guide (Atlas, OAuth, environment, Vite bundle).
 - [docs/demo-script.md](file:///d:/CRM_ZOHO_BOOKS/docs/demo-script.md): Concise 3–5 minute live demonstration walkthrough script.
-
