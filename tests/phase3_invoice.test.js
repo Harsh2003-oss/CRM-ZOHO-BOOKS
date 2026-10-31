@@ -1195,4 +1195,232 @@ test.describe('Phase 3 Step 3: Zoho Books M1 Invoice Workflow', () => {
     assert.equal(sync.syncStatus, 'FAILED');
     assert.notEqual(sync.syncStatus, 'M1_INVOICED');
   });
+
+  test('Rule 19: Forwarding configured ZOHO_UAE_VAT_TAX_ID and ZOHO_AED_CURRENCY_ID to Milestone Invoice', async () => {
+    const originalTaxId = process.env.ZOHO_UAE_VAT_TAX_ID;
+    const originalCurrencyId = process.env.ZOHO_AED_CURRENCY_ID;
+    try {
+      process.env.ZOHO_UAE_VAT_TAX_ID = 'tax_inv_uae_vat_5';
+      process.env.ZOHO_AED_CURRENCY_ID = 'curr_inv_aed_id';
+
+      await seedValidPrerequisites({ crmDealId: 'deal_tax_forward_inv' });
+      const mockClient = createMockZohoInvoiceClient();
+
+      const res = await InvoiceService.createMilestone1Invoice({
+        crmDealId: 'deal_tax_forward_inv',
+        injectedZohoClient: mockClient
+      });
+
+      assert.equal(res.status, 'CREATED');
+      assert.equal(res.subtotal, 60000.0);
+      assert.equal(res.taxAmount, 3000.0);
+      assert.equal(res.totalAmount, 63000.0);
+
+      // Verify payload forwarded to POST /invoices
+      const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/invoices');
+      assert.ok(postCall, 'Must call POST /invoices');
+      assert.equal(postCall.body.currency_id, 'curr_inv_aed_id');
+      assert.equal(postCall.body.line_items[0].tax_id, 'tax_inv_uae_vat_5');
+      assert.equal(postCall.body.line_items[0].tax_percentage, 5.0);
+    } finally {
+      if (originalTaxId !== undefined) {
+        process.env.ZOHO_UAE_VAT_TAX_ID = originalTaxId;
+      } else {
+        delete process.env.ZOHO_UAE_VAT_TAX_ID;
+      }
+      if (originalCurrencyId !== undefined) {
+        process.env.ZOHO_AED_CURRENCY_ID = originalCurrencyId;
+      } else {
+        delete process.env.ZOHO_AED_CURRENCY_ID;
+      }
+    }
+  });
+
+  test('Rule 20: Mathematical verification across M1 (50%), M2 (30%), and M3 (20%) milestone invoices', async () => {
+    await seedValidPrerequisites({ crmDealId: 'deal_milestone_math_all' });
+
+    // Helper mock invoice generator for custom milestone
+    function createCustomMilestoneMockClient(expectedSubtotal, expectedTax, expectedGross, milestoneIndex) {
+      return {
+        calls: [],
+        request: async ({ method, path, body }) => {
+          if (method === 'GET' && path.startsWith('/salesorders/')) {
+            return {
+              statusCode: 200,
+              data: {
+                code: 0,
+                salesorder: {
+                  salesorder_id: 'so_valid_123',
+                  line_items: [{ line_item_id: 'so_item_999', name: 'Software Contract', rate: 120000.0 }]
+                }
+              }
+            };
+          }
+          if (method === 'GET' && path.startsWith('/invoices?reference_number=')) {
+            return { statusCode: 200, data: { code: 0, invoices: [] } };
+          }
+          if (method === 'POST' && path === '/invoices') {
+            return {
+              statusCode: 200,
+              data: {
+                code: 0,
+                invoice: {
+                  invoice_id: `inv_m${milestoneIndex}_mock`,
+                  invoice_number: `INV-M${milestoneIndex}-01`,
+                  reference_number: body.reference_number,
+                  salesorder_id: 'so_valid_123',
+                  sub_total: expectedSubtotal,
+                  tax_total: expectedTax,
+                  total: expectedGross,
+                  balance: expectedGross,
+                  currency_code: 'AED',
+                  line_items: [
+                    {
+                      line_item_id: `inv_item_m${milestoneIndex}`,
+                      salesorder_item_id: 'so_item_999',
+                      rate: expectedSubtotal,
+                      quantity: 1
+                    }
+                  ]
+                }
+              }
+            };
+          }
+          return { statusCode: 200, data: { code: 0 } };
+        }
+      };
+    }
+
+    // M1: 50% Signing (Subtotal: 60,000, VAT: 3,000, Gross: 63,000)
+    const m1Res = await InvoiceService.createMilestone1Invoice({
+      crmDealId: 'deal_milestone_math_all',
+      injectedZohoClient: createCustomMilestoneMockClient(60000.0, 3000.0, 63000.0, 1)
+    });
+    assert.equal(m1Res.subtotal, 60000.0);
+    assert.equal(m1Res.taxAmount, 3000.0);
+    assert.equal(m1Res.totalAmount, 63000.0);
+
+    // M2: 30% Go-Live (Subtotal: 36,000, VAT: 1,800, Gross: 37,800)
+    const m2Res = await InvoiceService.createMilestone2Invoice({
+      crmDealId: 'deal_milestone_math_all',
+      injectedZohoClient: createCustomMilestoneMockClient(36000.0, 1800.0, 37800.0, 2)
+    });
+    assert.equal(m2Res.subtotal, 36000.0);
+    assert.equal(m2Res.taxAmount, 1800.0);
+    assert.equal(m2Res.totalAmount, 37800.0);
+
+    // M3: 20% 90-Days (Subtotal: 24,000, VAT: 1,200, Gross: 25,200)
+    const m3Res = await InvoiceService.createMilestone3Invoice({
+      crmDealId: 'deal_milestone_math_all',
+      injectedZohoClient: createCustomMilestoneMockClient(24000.0, 1200.0, 25200.0, 3)
+    });
+    assert.equal(m3Res.subtotal, 24000.0);
+    assert.equal(m3Res.taxAmount, 1200.0);
+    assert.equal(m3Res.totalAmount, 25200.0);
+
+    // Check Cumulative Sums
+    const totalSubtotal = m1Res.subtotal + m2Res.subtotal + m3Res.subtotal;
+    const totalTax = m1Res.taxAmount + m2Res.taxAmount + m3Res.taxAmount;
+    const totalGross = m1Res.totalAmount + m2Res.totalAmount + m3Res.totalAmount;
+
+    assert.equal(totalSubtotal, 120000.0);
+    assert.equal(totalTax, 6000.0);
+    assert.equal(totalGross, 126000.0);
+  });
+
+  test('Rule 21: Incorrect Zoho-calculated invoice tax fails validation without saving as CREATED', async () => {
+    await seedValidPrerequisites({ crmDealId: 'deal_wrong_tax_invoice' });
+
+    const mockClient = {
+      calls: [],
+      request: async ({ method, path }) => {
+        if (method === 'GET' && path.startsWith('/salesorders/')) {
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              salesorder: {
+                salesorder_id: 'so_valid_123',
+                line_items: [{ line_item_id: 'so_item_999', name: 'Software Contract', rate: 120000.0 }]
+              }
+            }
+          };
+        }
+        if (method === 'GET' && path.startsWith('/invoices?reference_number=')) {
+          return { statusCode: 200, data: { code: 0, invoices: [] } };
+        }
+        if (method === 'POST' && path === '/invoices') {
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              invoice: {
+                invoice_id: 'inv_wrong_tax_001',
+                salesorder_id: 'so_valid_123',
+                sub_total: 60000.0,
+                tax_total: 2500.0, // Incorrect tax (expected 3000.0)
+                total: 62500.0,
+                currency_code: 'AED',
+                line_items: [
+                  {
+                    line_item_id: 'inv_item_bad_tax',
+                    salesorder_item_id: 'so_item_999',
+                    rate: 60000.0,
+                    quantity: 1
+                  }
+                ]
+              }
+            }
+          };
+        }
+        return { statusCode: 200, data: { code: 0 } };
+      }
+    };
+
+    await assert.rejects(
+      async () => {
+        await InvoiceService.createMilestone1Invoice({
+          crmDealId: 'deal_wrong_tax_invoice',
+          injectedZohoClient: mockClient
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'INVOICE_FINANCIAL_VALIDATION_FAILED');
+        assert.match(err.message, /Expected Subtotal=60000.00, Tax=3000.00, Gross=63000.00/);
+        return true;
+      }
+    );
+
+    const mRecord = await MilestoneInvoice.findOne({ crmDealId: 'deal_wrong_tax_invoice', milestoneIndex: 1 });
+    assert.ok(mRecord);
+    assert.equal(mRecord.status, 'FAILED_VALIDATION');
+    assert.notEqual(mRecord.status, 'CREATED');
+
+    const sync = await IntegrationSync.findOne({ crmDealId: 'deal_wrong_tax_invoice' });
+    assert.ok(sync);
+    assert.equal(sync.syncStatus, 'FAILED');
+  });
+
+  test('Rule 22: Idempotency after retry returns cached milestone invoice without duplicate POST', async () => {
+    await seedValidPrerequisites({ crmDealId: 'deal_retry_m1_idempotent' });
+    const mockClient = createMockZohoInvoiceClient();
+
+    // First call creates
+    const firstRes = await InvoiceService.createMilestone1Invoice({
+      crmDealId: 'deal_retry_m1_idempotent',
+      injectedZohoClient: mockClient
+    });
+    assert.equal(firstRes.status, 'CREATED');
+    const initialCalls = mockClient.calls.length;
+
+    // Second call returns cached
+    const secondRes = await InvoiceService.createMilestone1Invoice({
+      crmDealId: 'deal_retry_m1_idempotent',
+      injectedZohoClient: mockClient
+    });
+    assert.equal(secondRes.status, 'ALREADY_CREATED');
+    assert.equal(secondRes.fromCache, true);
+    assert.equal(secondRes.zohoInvoiceId, firstRes.zohoInvoiceId);
+    assert.equal(mockClient.calls.length, initialCalls, 'Zero additional API calls on retry');
+  });
 });

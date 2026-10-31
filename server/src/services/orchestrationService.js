@@ -409,6 +409,10 @@ class OrchestrationService {
         }
       );
 
+      // Resolve tax and currency configuration from environment (Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID)
+      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
       // Create Sales Order
       let salesOrderResult;
       try {
@@ -418,6 +422,8 @@ class OrchestrationService {
           dealName,
           amount: contractAmount,
           currencyCode: 'AED',
+          taxId: configuredTaxId,
+          currencyId: configuredCurrencyId,
           workerId: executionWorkerId,
           injectedZohoClient: zClient
         });
@@ -446,6 +452,8 @@ class OrchestrationService {
           dealStage: 'closedwon',
           contractAmount,
           currencyCode: 'AED',
+          taxId: configuredTaxId,
+          currencyId: configuredCurrencyId,
           workerId: executionWorkerId,
           injectedZohoClient: zClient
         });
@@ -713,11 +721,16 @@ class OrchestrationService {
       );
 
       // Create M2 Invoice (30% Go-Live)
+      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
       const invRes = await InvoiceService.createMilestone2Invoice({
         crmDealId,
         hubspotCompanyId: dealRes.data?.associations?.companies?.results?.[0]?.id,
         contractAmount: dealProps.amount ? Number(dealProps.amount) : syncRecord.salesOrderSubtotal,
         currencyCode: syncRecord.currencyCode || 'AED',
+        taxId: configuredTaxId,
+        currencyId: configuredCurrencyId,
         workerId: executionWorkerId,
         injectedZohoClient: zClient
       });
@@ -875,10 +888,15 @@ class OrchestrationService {
       }
 
       // Eligible: Create M3 Invoice (20%)
+      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
       const invRes = await InvoiceService.createMilestone3Invoice({
         crmDealId,
         contractAmount: syncRecord.salesOrderSubtotal || 120000.0,
         currencyCode: syncRecord.currencyCode || 'AED',
+        taxId: configuredTaxId,
+        currencyId: configuredCurrencyId,
         workerId: executionWorkerId,
         injectedZohoClient: zClient
       });

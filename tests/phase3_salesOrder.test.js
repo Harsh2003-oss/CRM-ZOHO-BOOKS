@@ -737,5 +737,195 @@ test.describe('Phase 3 Step 2: Zoho Books Sales Order Workflow', () => {
       }
     );
   });
+
+  test('Rule 17: Forwarding configured ZOHO_UAE_VAT_TAX_ID and ZOHO_AED_CURRENCY_ID to Sales Order payload', async () => {
+    const originalTaxId = process.env.ZOHO_UAE_VAT_TAX_ID;
+    const originalCurrencyId = process.env.ZOHO_AED_CURRENCY_ID;
+    try {
+      process.env.ZOHO_UAE_VAT_TAX_ID = 'tax_custom_uae_vat_5_pct';
+      process.env.ZOHO_AED_CURRENCY_ID = 'curr_custom_aed_id';
+
+      const mockClient = createMockZohoClient();
+
+      const res = await SalesOrderService.createAndConfirmSalesOrder({
+        crmDealId: 'deal_tax_forwarding_01',
+        zohoContactId: 'cust_real_4001',
+        dealName: 'Cloud Infrastructure Contract',
+        amount: 120000.0,
+        currencyCode: 'AED',
+        injectedZohoClient: mockClient
+      });
+
+      assert.equal(res.status, 'CONFIRMED');
+      assert.equal(res.salesOrderSubtotal, 120000.0);
+      assert.equal(res.salesOrderTax, 6000.0);
+      assert.equal(res.salesOrderTotal, 126000.0);
+
+      // Verify payload forwarded to Zoho POST /salesorders
+      const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/salesorders');
+      assert.ok(postCall, 'Must invoke POST /salesorders');
+      assert.equal(postCall.body.currency_id, 'curr_custom_aed_id');
+      assert.equal(postCall.body.line_items[0].tax_id, 'tax_custom_uae_vat_5_pct');
+    } finally {
+      if (originalTaxId !== undefined) {
+        process.env.ZOHO_UAE_VAT_TAX_ID = originalTaxId;
+      } else {
+        delete process.env.ZOHO_UAE_VAT_TAX_ID;
+      }
+      if (originalCurrencyId !== undefined) {
+        process.env.ZOHO_AED_CURRENCY_ID = originalCurrencyId;
+      } else {
+        delete process.env.ZOHO_AED_CURRENCY_ID;
+      }
+    }
+  });
+
+  test('Rule 18: Missing tax configuration fails safely when Zoho returns 0 tax without confirmation', async () => {
+    const mockClient = {
+      calls: [],
+      request: async ({ method, path, body }) => {
+        mockClient.calls.push({ method, path, body });
+        if (method === 'GET' && path.startsWith('/salesorders?reference_number=')) {
+          return { statusCode: 200, data: { code: 0, salesorders: [] } };
+        }
+        if (method === 'POST' && path === '/salesorders') {
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              salesorder: {
+                salesorder_id: 'so_zero_tax_123',
+                salesorder_number: 'SO-ZERO-01',
+                reference_number: body.reference_number,
+                sub_total: 120000.0,
+                tax_total: 0.0, // Zoho calculated 0 tax because tax_id was missing
+                total: 120000.0,
+                currency_code: 'AED',
+                status: 'draft',
+                order_status: 'draft'
+              }
+            }
+          };
+        }
+        if (method === 'POST' && path.includes('/status/confirmed')) {
+          return { statusCode: 200, data: { code: 0, message: 'Confirmed' } };
+        }
+        return { statusCode: 200, data: { code: 0 } };
+      }
+    };
+
+    await assert.rejects(
+      async () => {
+        await SalesOrderService.createAndConfirmSalesOrder({
+          crmDealId: 'deal_missing_tax_zero_vat',
+          zohoContactId: 'cust_real_4001',
+          amount: 120000.0,
+          currencyCode: 'AED',
+          taxId: null,
+          injectedZohoClient: mockClient
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'SALES_ORDER_FINANCIAL_VALIDATION_FAILED');
+        assert.match(err.message, /Financial Validation Failed/);
+        return true;
+      }
+    );
+
+    // Confirm that /status/confirmed was NEVER called (safety check)
+    const confirmCalls = mockClient.calls.filter((c) => c.path.includes('/status/confirmed'));
+    assert.equal(confirmCalls.length, 0, 'Must NOT call confirmation when financial validation fails');
+
+    // Verify MongoDB status is FAILED and salesOrderStatus is NOT confirmed
+    const dbRecord = await IntegrationSync.findOne({ crmDealId: 'deal_missing_tax_zero_vat' });
+    assert.ok(dbRecord);
+    assert.equal(dbRecord.syncStatus, 'FAILED');
+    assert.equal(dbRecord.salesOrderStatus, 'NONE');
+    assert.notEqual(dbRecord.salesOrderStatus, 'CONFIRMED');
+  });
+
+  test('Rule 19: Incorrect Zoho-calculated tax triggers financial validation failure without confirmation', async () => {
+    const mockClient = {
+      calls: [],
+      request: async ({ method, path, body }) => {
+        mockClient.calls.push({ method, path, body });
+        if (method === 'GET' && path.startsWith('/salesorders?reference_number=')) {
+          return { statusCode: 200, data: { code: 0, salesorders: [] } };
+        }
+        if (method === 'POST' && path === '/salesorders') {
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              salesorder: {
+                salesorder_id: 'so_wrong_tax_456',
+                salesorder_number: 'SO-WRONG-01',
+                reference_number: body.reference_number,
+                sub_total: 120000.0,
+                tax_total: 5000.0, // Incorrect tax (expected 6000.0)
+                total: 125000.0,
+                currency_code: 'AED',
+                status: 'draft',
+                order_status: 'draft'
+              }
+            }
+          };
+        }
+        return { statusCode: 200, data: { code: 0 } };
+      }
+    };
+
+    await assert.rejects(
+      async () => {
+        await SalesOrderService.createAndConfirmSalesOrder({
+          crmDealId: 'deal_wrong_tax_calc',
+          zohoContactId: 'cust_real_4001',
+          amount: 120000.0,
+          currencyCode: 'AED',
+          injectedZohoClient: mockClient
+        });
+      },
+      (err) => {
+        assert.equal(err.code, 'SALES_ORDER_FINANCIAL_VALIDATION_FAILED');
+        assert.match(err.message, /Expected Subtotal=120000.00, Tax=6000.00, Gross=126000.00/);
+        return true;
+      }
+    );
+
+    const confirmCalls = mockClient.calls.filter((c) => c.path.includes('/status/confirmed'));
+    assert.equal(confirmCalls.length, 0);
+
+    const dbRecord = await IntegrationSync.findOne({ crmDealId: 'deal_wrong_tax_calc' });
+    assert.equal(dbRecord.syncStatus, 'FAILED');
+  });
+
+  test('Rule 20: Idempotency after retry returns cached confirmed order without re-POSTing', async () => {
+    const mockClient = createMockZohoClient();
+
+    // First attempt creates and confirms
+    const firstRes = await SalesOrderService.createAndConfirmSalesOrder({
+      crmDealId: 'deal_retry_idempotency_01',
+      zohoContactId: 'cust_real_4001',
+      dealName: 'Cloud Infrastructure Contract',
+      amount: 120000.0,
+      currencyCode: 'AED',
+      injectedZohoClient: mockClient
+    });
+    assert.equal(firstRes.status, 'CONFIRMED');
+    const initialCallCount = mockClient.calls.length;
+
+    // Retry invocation for identical deal
+    const retryRes = await SalesOrderService.createAndConfirmSalesOrder({
+      crmDealId: 'deal_retry_idempotency_01',
+      zohoContactId: 'cust_real_4001',
+      injectedZohoClient: mockClient
+    });
+
+    assert.equal(retryRes.status, 'ALREADY_CONFIRMED');
+    assert.equal(retryRes.fromCache, true);
+    assert.equal(retryRes.zohoSalesOrderId, firstRes.zohoSalesOrderId);
+    // Zero new API calls on retry
+    assert.equal(mockClient.calls.length, initialCallCount);
+  });
 });
 

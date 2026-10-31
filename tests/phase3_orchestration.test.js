@@ -1008,4 +1008,82 @@ test('Phase 3 Step 4: HubSpot Deal Property Updates & End-to-End Orchestration',
     assert.equal(eventDoc.status, 'PROCESSED');
     assert.ok(eventDoc.processedAt);
   });
+
+  // 20. End-to-End Tax and Currency ID Forwarding for Sales Order & Milestone 1
+  await t.test('Scenario 20: End-to-end orchestration passes configured tax ID and currency ID to Sales Order and M1 Invoice', async () => {
+    const originalTaxId = process.env.ZOHO_UAE_VAT_TAX_ID;
+    const originalCurrencyId = process.env.ZOHO_AED_CURRENCY_ID;
+    try {
+      process.env.ZOHO_UAE_VAT_TAX_ID = 'tax_orch_uae_vat_5';
+      process.env.ZOHO_AED_CURRENCY_ID = 'curr_orch_aed_id';
+
+      const mockZoho = createMockZohoClient();
+      const mockHs = createMockHubSpotClient({ dealAmount: 120000.0 });
+
+      const res = await OrchestrationService.processClosedWonDeal({
+        crmDealId: 'deal_orch_tax_forward_99',
+        injectedHubSpotClient: mockHs,
+        injectedZohoClient: mockZoho
+      });
+
+      assert.equal(res.status, 'SYNCED');
+      assert.ok(res.zohoSalesOrderId);
+      assert.ok(res.zohoInvoiceId);
+
+      // Verify payload forwarded to Zoho POST /salesorders
+      const soPost = mockZoho.calls.find((c) => c.method === 'POST' && c.path === '/salesorders');
+      assert.ok(soPost, 'Must invoke POST /salesorders');
+      assert.equal(soPost.body.currency_id, 'curr_orch_aed_id');
+      assert.equal(soPost.body.line_items[0].tax_id, 'tax_orch_uae_vat_5');
+
+      // Verify payload forwarded to Zoho POST /invoices
+      const invPost = mockZoho.calls.find((c) => c.method === 'POST' && c.path === '/invoices');
+      assert.ok(invPost, 'Must invoke POST /invoices');
+      assert.equal(invPost.body.currency_id, 'curr_orch_aed_id');
+      assert.equal(invPost.body.line_items[0].tax_id, 'tax_orch_uae_vat_5');
+      assert.equal(invPost.body.line_items[0].tax_percentage, 5.0);
+
+      // Verify persistence in MongoDB
+      const syncDoc = await IntegrationSync.findOne({ crmDealId: 'deal_orch_tax_forward_99' });
+      assert.ok(syncDoc);
+      assert.equal(syncDoc.salesOrderTotal, 126000.0);
+      assert.equal(syncDoc.salesOrderTax, 6000.0);
+      assert.equal(syncDoc.salesOrderSubtotal, 120000.0);
+
+      const m1Doc = await MilestoneInvoice.findOne({ crmDealId: 'deal_orch_tax_forward_99', milestoneIndex: 1 });
+      assert.ok(m1Doc);
+      assert.equal(m1Doc.status, 'CREATED');
+      assert.equal(m1Doc.totalAmount, 63000.0);
+      assert.equal(m1Doc.taxAmount, 3000.0);
+      assert.equal(m1Doc.subtotal, 60000.0);
+
+      // Idempotency check: Re-process same deal does not create duplicate Sales Order or Invoice
+      const soPostsBeforeRetry = mockZoho.calls.filter((c) => c.method === 'POST' && c.path === '/salesorders').length;
+      const invPostsBeforeRetry = mockZoho.calls.filter((c) => c.method === 'POST' && c.path === '/invoices').length;
+
+      const retryRes = await OrchestrationService.processClosedWonDeal({
+        crmDealId: 'deal_orch_tax_forward_99',
+        injectedHubSpotClient: mockHs,
+        injectedZohoClient: mockZoho
+      });
+      assert.equal(retryRes.status, 'SYNCED');
+
+      const soPostsAfterRetry = mockZoho.calls.filter((c) => c.method === 'POST' && c.path === '/salesorders').length;
+      const invPostsAfterRetry = mockZoho.calls.filter((c) => c.method === 'POST' && c.path === '/invoices').length;
+
+      assert.equal(soPostsAfterRetry, soPostsBeforeRetry, 'Zero extra Sales Order POSTs on retry');
+      assert.equal(invPostsAfterRetry, invPostsBeforeRetry, 'Zero extra Invoice POSTs on retry');
+    } finally {
+      if (originalTaxId !== undefined) {
+        process.env.ZOHO_UAE_VAT_TAX_ID = originalTaxId;
+      } else {
+        delete process.env.ZOHO_UAE_VAT_TAX_ID;
+      }
+      if (originalCurrencyId !== undefined) {
+        process.env.ZOHO_AED_CURRENCY_ID = originalCurrencyId;
+      } else {
+        delete process.env.ZOHO_AED_CURRENCY_ID;
+      }
+    }
+  });
 });

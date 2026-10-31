@@ -297,7 +297,10 @@ class InvoiceService {
         // =====================================================================
         // STEP 4: Create new Milestone invoice in Zoho Books
         // =====================================================================
-        const configuredTaxId = taxId || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+        // Resolve tax and currency configuration from parameters or environment
+        // Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID; Fallback: ZOHO_BOOKS_* aliases
+        const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+        const configuredCurrencyId = currencyId || process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
 
         const lineItem = {
           salesorder_item_id: salesOrderItemId,
@@ -322,8 +325,8 @@ class InvoiceService {
           notes: `Milestone ${milestoneIndex}: ${config.percentage}% ${config.name} invoice for deal ${crmDealId}. Subtotal: AED ${(mSubtotalMinor / 100).toFixed(2)}, 5% VAT: AED ${(mTaxMinor / 100).toFixed(2)}, Gross: AED ${(mGrossMinor / 100).toFixed(2)}.`
         };
 
-        if (currencyId) {
-          createPayload.currency_id = currencyId;
+        if (configuredCurrencyId) {
+          createPayload.currency_id = configuredCurrencyId;
         }
 
         let createRes;

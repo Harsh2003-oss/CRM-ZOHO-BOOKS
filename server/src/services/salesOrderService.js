@@ -146,6 +146,11 @@ class SalesOrderService {
       throw new Error('crmDealId is required to process Sales Order.');
     }
 
+    // Resolve tax and currency configuration from parameters or environment
+    // Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID; Fallback: ZOHO_BOOKS_* aliases
+    const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+    const configuredCurrencyId = currencyId || process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
     // Always generate an internal unique execution ID even if caller provided workerId
     // Retains caller's prefix for tracing but guarantees zero shared worker IDs across concurrent callers
     const executionId = crypto.randomUUID();
@@ -260,8 +265,8 @@ class SalesOrderService {
           lineItem.item_id = itemId;
         }
 
-        if (taxId) {
-          lineItem.tax_id = taxId;
+        if (configuredTaxId) {
+          lineItem.tax_id = configuredTaxId;
         }
 
         const createPayload = {
@@ -272,8 +277,8 @@ class SalesOrderService {
           notes: `Synced from HubSpot Deal ${crmDealId}. Subtotal: AED ${(subtotalMinor / 100).toFixed(2)}, 5% VAT: AED ${(taxMinor / 100).toFixed(2)}, Gross: AED ${(grossMinor / 100).toFixed(2)}.`
         };
 
-        if (currencyId) {
-          createPayload.currency_id = currencyId;
+        if (configuredCurrencyId) {
+          createPayload.currency_id = configuredCurrencyId;
         }
 
         let createRes;
