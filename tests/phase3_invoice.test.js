@@ -1423,4 +1423,115 @@ test.describe('Phase 3 Step 3: Zoho Books M1 Invoice Workflow', () => {
     assert.equal(secondRes.zohoInvoiceId, firstRes.zohoInvoiceId);
     assert.equal(mockClient.calls.length, initialCalls, 'Zero additional API calls on retry');
   });
+
+  test('Rule 23: Explicit taxPercentage = 0 creates M1 invoice without tax_id/tax_percentage and validates 0 tax', async () => {
+    await seedValidPrerequisites({
+      crmDealId: 'deal_zero_vat_m1_test',
+      salesOrderSubtotal: 120000.0,
+      salesOrderTax: 0.0,
+      salesOrderTotal: 120000.0
+    });
+
+    const mockClient = {
+      calls: [],
+      request: async ({ method, path, body }) => {
+        mockClient.calls.push({ method, path, body });
+        if (method === 'GET' && path.startsWith('/salesorders/')) {
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              salesorder: {
+                salesorder_id: 'so_valid_123',
+                line_items: [{ line_item_id: 'so_item_999', name: 'Software Contract', rate: 120000.0 }]
+              }
+            }
+          };
+        }
+        if (method === 'GET' && path.startsWith('/invoices?reference_number=')) {
+          return { statusCode: 200, data: { code: 0, invoices: [] } };
+        }
+        if (method === 'POST' && path === '/invoices') {
+          const subtotal = body.line_items[0].rate;
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              message: 'Invoice created',
+              invoice: {
+                invoice_id: 'inv_zero_tax_01',
+                invoice_number: 'INV-ZERO-01',
+                reference_number: body.reference_number,
+                salesorder_id: body.salesorder_id || 'so_valid_123',
+                currency_code: 'AED',
+                sub_total: subtotal,
+                tax_total: 0.0,
+                total: subtotal,
+                balance: subtotal,
+                due_date: body.due_date,
+                line_items: [{
+                  line_item_id: 'inv_item_zero_01',
+                  salesorder_item_id: 'so_item_999',
+                  rate: subtotal
+                }]
+              }
+            }
+          };
+        }
+        return { statusCode: 404, data: { code: 1, message: 'Not found' } };
+      }
+    };
+
+    const res = await InvoiceService.createMilestone1Invoice({
+      crmDealId: 'deal_zero_vat_m1_test',
+      contractAmount: 120000.0,
+      currencyCode: 'AED',
+      taxPercentage: 0,
+      taxId: 'tax_should_be_omitted',
+      injectedZohoClient: mockClient
+    });
+
+    assert.equal(res.status, 'CREATED');
+    assert.equal(res.subtotal, 60000.0);
+    assert.equal(res.taxAmount, 0.0);
+    assert.equal(res.totalAmount, 60000.0);
+
+    const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/invoices');
+    assert.ok(postCall);
+    assert.equal(postCall.body.line_items[0].rate, 60000.0);
+    assert.equal(postCall.body.line_items[0].tax_id, undefined, 'No tax_id when taxPercentage is 0');
+    assert.equal(postCall.body.line_items[0].tax_percentage, undefined, 'No tax_percentage when taxPercentage is 0');
+    assert.match(postCall.body.notes, /VAT \(0%\): AED 0\.00/);
+
+    const mDoc = await MilestoneInvoice.findOne({ crmDealId: 'deal_zero_vat_m1_test', milestoneIndex: 1 });
+    assert.ok(mDoc);
+    assert.equal(mDoc.subtotal, 60000.0);
+    assert.equal(mDoc.taxAmount, 0.0);
+    assert.equal(mDoc.totalAmount, 60000.0);
+  });
+
+  test('Rule 24: Explicit taxPercentage = 5.0 preserves 5% VAT with tax_id and tax_percentage', async () => {
+    await seedValidPrerequisites({ crmDealId: 'deal_explicit_5pct_m1_test' });
+    const mockClient = createMockZohoInvoiceClient();
+
+    const res = await InvoiceService.createMilestone1Invoice({
+      crmDealId: 'deal_explicit_5pct_m1_test',
+      contractAmount: 120000.0,
+      currencyCode: 'AED',
+      taxPercentage: 5.0,
+      taxId: 'tax_custom_5_pct',
+      injectedZohoClient: mockClient
+    });
+
+    assert.equal(res.status, 'CREATED');
+    assert.equal(res.subtotal, 60000.0);
+    assert.equal(res.taxAmount, 3000.0);
+    assert.equal(res.totalAmount, 63000.0);
+
+    const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/invoices');
+    assert.ok(postCall);
+    assert.equal(postCall.body.line_items[0].tax_id, 'tax_custom_5_pct');
+    assert.equal(postCall.body.line_items[0].tax_percentage, 5.0);
+    assert.match(postCall.body.notes, /5% VAT: AED 3000\.00/);
+  });
 });

@@ -30,7 +30,7 @@ class InvoiceService {
     currencyCode = 'AED',
     currencyId = null,
     taxId = null,
-    taxPercentage = 5.0,
+    taxPercentage = null,
     workerId = null,
     leaseDurationMs = 5 * 60 * 1000,
     heartbeatIntervalMs = null,
@@ -251,8 +251,19 @@ class InvoiceService {
       // M3 = 20% (AED 24,000 subtotal, AED 1,200 VAT, AED 25,200 gross)
       // Subtotals sum exactly to AED 120,000.00 (100.0%)
       // =======================================================================
+      let effectiveTaxPercentage;
+      if (taxPercentage !== undefined && taxPercentage !== null) {
+        effectiveTaxPercentage = Number(taxPercentage);
+      } else if (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.VAT_PERCENTAGE);
+      } else if (process.env.TAX_PERCENTAGE !== undefined && process.env.TAX_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.TAX_PERCENTAGE);
+      } else {
+        effectiveTaxPercentage = 5.0;
+      }
+
       const mSubtotalMinor = Math.round((contractSubtotalMinor * config.percentage) / 100);
-      const mTaxMinor = Math.round((mSubtotalMinor * taxPercentage) / 100);
+      const mTaxMinor = Math.round((mSubtotalMinor * effectiveTaxPercentage) / 100);
       const mGrossMinor = mSubtotalMinor + mTaxMinor;
 
       const expectedSubtotal = mSubtotalMinor / 100;
@@ -310,11 +321,12 @@ class InvoiceService {
           quantity: 1
         };
 
-        if (configuredTaxId) {
+        if (configuredTaxId && effectiveTaxPercentage > 0) {
           lineItem.tax_id = configuredTaxId;
-          lineItem.tax_percentage = taxPercentage;
+          lineItem.tax_percentage = effectiveTaxPercentage;
         }
 
+        const vatLabel = effectiveTaxPercentage === 0 ? 'VAT (0%)' : `${effectiveTaxPercentage}% VAT`;
         const createPayload = {
           customer_id: customerMapping.zohoContactId,
           salesorder_id: syncRecord.zohoSalesOrderId,
@@ -322,7 +334,7 @@ class InvoiceService {
           date: new Date().toISOString().split('T')[0],
           due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           line_items: [lineItem],
-          notes: `Milestone ${milestoneIndex}: ${config.percentage}% ${config.name} invoice for deal ${crmDealId}. Subtotal: AED ${(mSubtotalMinor / 100).toFixed(2)}, 5% VAT: AED ${(mTaxMinor / 100).toFixed(2)}, Gross: AED ${(mGrossMinor / 100).toFixed(2)}.`
+          notes: `Milestone ${milestoneIndex}: ${config.percentage}% ${config.name} invoice for deal ${crmDealId}. Subtotal: AED ${(mSubtotalMinor / 100).toFixed(2)}, ${vatLabel}: AED ${(mTaxMinor / 100).toFixed(2)}, Gross: AED ${(mGrossMinor / 100).toFixed(2)}.`
         };
 
         if (configuredCurrencyId) {

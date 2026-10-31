@@ -2,16 +2,59 @@ const express = require('express');
 const crypto = require('crypto');
 const WebhookService = require('../services/webhookService');
 const QueueService = require('../services/queueService');
+const { verifyHubSpotSignatureV3, getRequestUri } = require('../utils/hubspotSignature');
 
 const router = express.Router();
 
 /**
  * POST /api/webhooks/hubspot
- * High-speed webhook ingestion endpoint.
+ * High-speed webhook ingestion endpoint with HubSpot Signature v3 authentication.
  * Returns HTTP 202 Accepted immediately (< 50ms) to ensure HubSpot CRM never waits for Zoho.
  */
 router.post('/hubspot', async (req, res) => {
   const startTime = Date.now();
+
+  // 1. Authenticity verification via HubSpot Signature v3
+  const clientSecret = process.env.HUBSPOT_CLIENT_SECRET || process.env.HUBSPOT_WEBHOOK_SECRET;
+
+  if ((process.env.NODE_ENV === 'production' || process.env.HUBSPOT_SIGNATURE_REQUIRED === 'true') && !clientSecret) {
+    return res.status(503).json({
+      success: false,
+      error: 'SECURITY_CONFIG_ERROR',
+      message: 'HubSpot webhook signature verification is mandatory in production but HUBSPOT_CLIENT_SECRET is not configured.'
+    });
+  }
+
+  if (clientSecret) {
+    const signature = req.headers['x-hubspot-signature-v3'] || req.headers['x-hubspot-signature'];
+    const timestamp = req.headers['x-hubspot-request-timestamp'];
+
+    if (!signature || !timestamp) {
+      return res.status(401).json({
+        success: false,
+        error: 'UNAUTHORIZED_HUBSPOT_WEBHOOK',
+        message: 'Missing required HubSpot webhook signature headers (X-HubSpot-Signature-v3 and X-HubSpot-Request-Timestamp).'
+      });
+    }
+
+    const requestUri = getRequestUri(req);
+    const verification = verifyHubSpotSignatureV3({
+      method: req.method,
+      requestUri,
+      requestBody: req.rawBody !== undefined ? req.rawBody : '',
+      timestamp,
+      signature,
+      clientSecret
+    });
+
+    if (!verification.valid) {
+      return res.status(401).json({
+        success: false,
+        error: 'UNAUTHORIZED_HUBSPOT_WEBHOOK',
+        message: verification.message || 'HubSpot webhook signature verification failed.'
+      });
+    }
+  }
 
   try {
     const result = await WebhookService.processHubSpotWebhook(req.body);

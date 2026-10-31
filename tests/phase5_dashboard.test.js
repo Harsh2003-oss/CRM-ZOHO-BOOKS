@@ -541,4 +541,37 @@ test.describe('Phase 5: Integration Dashboard & Operational Monitoring', () => {
     assert.equal(res.headers['content-type'].includes('text/html'), true);
     assert.ok(res.text.includes('<div id="root"></div>'));
   });
+
+  // 16. Integration Monitoring Queue Stats & Status Keys Mapping
+  test('Scenario 16: GET /api/dashboard/events returns uppercase queueStats matching WebhookEvent statuses', async () => {
+    await WebhookEvent.create([
+      { eventId: 'evt_q_1', source: 'CRM', eventType: 'deal.propertyChange', status: 'RECEIVED', payload: { dealId: '101' } },
+      { eventId: 'evt_q_2', source: 'CRM', eventType: 'deal.propertyChange', status: 'PROCESSING', payload: { dealId: '102' } },
+      { eventId: 'evt_q_3', source: 'CRM', eventType: 'deal.propertyChange', status: 'PROCESSED', payload: { dealId: '103' } },
+      { eventId: 'evt_q_4', source: 'CRM', eventType: 'deal.propertyChange', status: 'FAILED', payload: { dealId: '104' } },
+      { eventId: 'evt_q_5', source: 'CRM', eventType: 'deal.propertyChange', status: 'IGNORED', payload: { dealId: '105' } }
+    ]);
+
+    const res = await request(app).get('/api/dashboard/events');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.ok(res.body.data.queueStats);
+
+    const qs = res.body.data.queueStats;
+    assert.equal(qs.RECEIVED, 1);
+    assert.equal(qs.PROCESSING, 1);
+    assert.equal(qs.PROCESSED, 1);
+    assert.equal(qs.FAILED, 1);
+    assert.equal(qs.IGNORED, 1);
+
+    // Verify frontend source file correctly reads uppercase keys and includes IGNORED banner
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const logsPageSource = fs.readFileSync(path.join(__dirname, '../client/src/pages/LogsPage.jsx'), 'utf-8');
+    assert.ok(logsPageSource.includes('queueStats.RECEIVED'));
+    assert.ok(logsPageSource.includes('queueStats.PROCESSING'));
+    assert.ok(logsPageSource.includes('queueStats.PROCESSED'));
+    assert.ok(logsPageSource.includes('queueStats.FAILED'));
+    assert.ok(logsPageSource.includes('queueStats.IGNORED'));
+  });
 });

@@ -106,7 +106,8 @@ function createMockZohoClient({
   createInvFails = false,
   invBalance = 63000.0,
   invDueDate = '2026-11-30',
-  omitInvBalance = false
+  omitInvBalance = false,
+  taxPercentage = 5.0
 } = {}) {
   const calls = [];
 
@@ -145,7 +146,8 @@ function createMockZohoClient({
           return { statusCode: 400, data: { code: 1001, message: 'Zoho Sales Order create failed' } };
         }
         const subtotal = body.line_items[0].rate;
-        const tax = Number((subtotal * 0.05).toFixed(2));
+        const taxRate = (taxPercentage !== undefined && taxPercentage !== null) ? Number(taxPercentage) : 5.0;
+        const tax = Number((subtotal * (taxRate / 100)).toFixed(2));
         const total = Number((subtotal + tax).toFixed(2));
         return {
           statusCode: 200,
@@ -197,7 +199,8 @@ function createMockZohoClient({
           return { statusCode: 400, data: { code: 2001, message: 'Zoho Invoice create failed' } };
         }
         const subtotal = body.line_items[0].rate;
-        const tax = Number((subtotal * 0.05).toFixed(2));
+        const taxRate = (taxPercentage !== undefined && taxPercentage !== null) ? Number(taxPercentage) : 5.0;
+        const tax = Number((subtotal * (taxRate / 100)).toFixed(2));
         const total = Number((subtotal + tax).toFixed(2));
         const inv = {
           invoice_id: `inv_mock_${globalInvCounter++}`,
@@ -221,7 +224,7 @@ function createMockZohoClient({
           ]
         };
         if (!omitInvBalance) {
-          inv.balance = invBalance;
+          inv.balance = taxRate === 0 ? total : invBalance;
         }
         return {
           statusCode: 200,
@@ -1083,6 +1086,114 @@ test('Phase 3 Step 4: HubSpot Deal Property Updates & End-to-End Orchestration',
         process.env.ZOHO_AED_CURRENCY_ID = originalCurrencyId;
       } else {
         delete process.env.ZOHO_AED_CURRENCY_ID;
+      }
+    }
+  });
+
+  // 21. End-to-End Orchestration with 0% VAT (NovaTech Approved Test Scenario)
+  await t.test('Scenario 21: End-to-end orchestration with explicit taxPercentage = 0 (0% VAT NovaTech)', async () => {
+    const originalTaxId = process.env.ZOHO_UAE_VAT_TAX_ID;
+    const originalVatPercentage = process.env.VAT_PERCENTAGE;
+    try {
+      process.env.ZOHO_UAE_VAT_TAX_ID = 'tax_uae_vat_configured';
+      delete process.env.VAT_PERCENTAGE;
+
+      const mockZoho = createMockZohoClient({ taxPercentage: 0 });
+      const mockHs = createMockHubSpotClient({ dealAmount: 120000.0 });
+
+      const res = await OrchestrationService.processClosedWonDeal({
+        crmDealId: '360608312029',
+        taxPercentage: 0,
+        injectedHubSpotClient: mockHs,
+        injectedZohoClient: mockZoho
+      });
+
+      assert.equal(res.status, 'SYNCED');
+      assert.ok(res.zohoSalesOrderId);
+      assert.ok(res.zohoInvoiceId);
+
+      // Verify Sales Order payload
+      const soPost = mockZoho.calls.find((c) => c.method === 'POST' && c.path === '/salesorders');
+      assert.ok(soPost);
+      assert.equal(soPost.body.line_items[0].rate, 120000.0);
+      assert.equal(soPost.body.line_items[0].tax_id, undefined, 'SO line item has no tax_id when taxPercentage is 0');
+      assert.match(soPost.body.notes, /VAT \(0%\): AED 0\.00/);
+
+      // Verify M1 Invoice payload
+      const invPost = mockZoho.calls.find((c) => c.method === 'POST' && c.path === '/invoices');
+      assert.ok(invPost);
+      assert.equal(invPost.body.line_items[0].rate, 60000.0);
+      assert.equal(invPost.body.line_items[0].tax_id, undefined, 'Invoice line item has no tax_id when taxPercentage is 0');
+      assert.equal(invPost.body.line_items[0].tax_percentage, undefined, 'Invoice line item has no tax_percentage when taxPercentage is 0');
+      assert.match(invPost.body.notes, /VAT \(0%\): AED 0\.00/);
+
+      // Verify MongoDB documents
+      const syncDoc = await IntegrationSync.findOne({ crmDealId: '360608312029' });
+      assert.ok(syncDoc);
+      assert.equal(syncDoc.salesOrderSubtotal, 120000.0);
+      assert.equal(syncDoc.salesOrderTax, 0.0);
+      assert.equal(syncDoc.salesOrderTotal, 120000.0);
+      assert.equal(syncDoc.syncStatus, 'SYNCED');
+
+      const m1Doc = await MilestoneInvoice.findOne({ crmDealId: '360608312029', milestoneIndex: 1 });
+      assert.ok(m1Doc);
+      assert.equal(m1Doc.subtotal, 60000.0);
+      assert.equal(m1Doc.taxAmount, 0.0);
+      assert.equal(m1Doc.totalAmount, 60000.0);
+      assert.equal(m1Doc.status, 'CREATED');
+
+      // Verify HubSpot deal property updates
+      const hsPatch = mockHs.calls.find((c) => c.method === 'PATCH');
+      assert.ok(hsPatch);
+      assert.equal(hsPatch.properties.zoho_sales_order_total, 120000.0);
+      assert.equal(hsPatch.properties.zoho_total_invoiced_amount, 60000.0);
+      assert.equal(hsPatch.properties.zoho_percentage_invoiced, 50.0);
+      assert.equal(hsPatch.properties.zoho_amount_not_invoiced, 60000.0);
+    } finally {
+      if (originalTaxId !== undefined) {
+        process.env.ZOHO_UAE_VAT_TAX_ID = originalTaxId;
+      } else {
+        delete process.env.ZOHO_UAE_VAT_TAX_ID;
+      }
+      if (originalVatPercentage !== undefined) {
+        process.env.VAT_PERCENTAGE = originalVatPercentage;
+      } else {
+        delete process.env.VAT_PERCENTAGE;
+      }
+    }
+  });
+
+  // 22. End-to-End Orchestration via process.env.VAT_PERCENTAGE = '0'
+  await t.test('Scenario 22: End-to-end orchestration picks up VAT_PERCENTAGE=0 from environment', async () => {
+    const originalVatPercentage = process.env.VAT_PERCENTAGE;
+    try {
+      process.env.VAT_PERCENTAGE = '0';
+
+      const mockZoho = createMockZohoClient({ taxPercentage: 0 });
+      const mockHs = createMockHubSpotClient({ dealAmount: 120000.0 });
+
+      // Call without explicit taxPercentage - should pick up process.env.VAT_PERCENTAGE
+      const res = await OrchestrationService.processClosedWonDeal({
+        crmDealId: 'deal_env_zero_vat_01',
+        injectedHubSpotClient: mockHs,
+        injectedZohoClient: mockZoho
+      });
+
+      assert.equal(res.status, 'SYNCED');
+      const syncDoc = await IntegrationSync.findOne({ crmDealId: 'deal_env_zero_vat_01' });
+      assert.equal(syncDoc.salesOrderTotal, 120000.0);
+      assert.equal(syncDoc.salesOrderTax, 0.0);
+      assert.equal(syncDoc.salesOrderSubtotal, 120000.0);
+
+      const m1Doc = await MilestoneInvoice.findOne({ crmDealId: 'deal_env_zero_vat_01', milestoneIndex: 1 });
+      assert.equal(m1Doc.totalAmount, 60000.0);
+      assert.equal(m1Doc.taxAmount, 0.0);
+      assert.equal(m1Doc.subtotal, 60000.0);
+    } finally {
+      if (originalVatPercentage !== undefined) {
+        process.env.VAT_PERCENTAGE = originalVatPercentage;
+      } else {
+        delete process.env.VAT_PERCENTAGE;
       }
     }
   });

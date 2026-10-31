@@ -927,5 +927,94 @@ test.describe('Phase 3 Step 2: Zoho Books Sales Order Workflow', () => {
     // Zero new API calls on retry
     assert.equal(mockClient.calls.length, initialCallCount);
   });
+
+  test('Rule 21: Explicit taxPercentage = 0 creates Sales Order without tax_id and verifies 0 tax', async () => {
+    const mockClient = {
+      calls: [],
+      request: async ({ method, path, body }) => {
+        mockClient.calls.push({ method, path, body });
+        if (method === 'GET' && path.startsWith('/salesorders?reference_number=')) {
+          return { statusCode: 200, data: { code: 0, message: 'success', salesorders: [] } };
+        }
+        if (method === 'POST' && path === '/salesorders') {
+          const subtotal = body.line_items[0].rate;
+          return {
+            statusCode: 200,
+            data: {
+              code: 0,
+              message: 'Sales Order has been created.',
+              salesorder: {
+                salesorder_id: 'so_zero_tax_approved',
+                salesorder_number: 'SO-ZERO-01',
+                reference_number: body.reference_number,
+                currency_code: 'AED',
+                sub_total: subtotal,
+                tax_total: 0.0,
+                total: subtotal,
+                status: 'draft'
+              }
+            }
+          };
+        }
+        if (method === 'POST' && path.includes('/status/confirmed')) {
+          return { statusCode: 200, data: { code: 0, message: 'Sales order status changed to Confirmed.' } };
+        }
+        return { statusCode: 404, data: { code: 1, message: 'Not found' } };
+      }
+    };
+
+    const res = await SalesOrderService.createAndConfirmSalesOrder({
+      crmDealId: 'deal_zero_tax_so_01',
+      zohoContactId: 'cust_real_4001',
+      dealName: 'NovaTech Zero VAT Deal',
+      amount: 120000.0,
+      currencyCode: 'AED',
+      taxPercentage: 0,
+      taxId: 'tax_should_be_ignored_when_zero',
+      injectedZohoClient: mockClient
+    });
+
+    assert.equal(res.status, 'CONFIRMED');
+    assert.equal(res.salesOrderSubtotal, 120000.0);
+    assert.equal(res.salesOrderTax, 0.0);
+    assert.equal(res.salesOrderTotal, 120000.0);
+
+    const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/salesorders');
+    assert.ok(postCall);
+    assert.equal(postCall.body.line_items[0].rate, 120000.0);
+    assert.equal(postCall.body.line_items[0].tax_id, undefined, 'No tax_id should be included when taxPercentage is 0');
+    assert.match(postCall.body.notes, /VAT \(0%\): AED 0\.00/);
+
+    const dbRecord = await IntegrationSync.findOne({ crmDealId: 'deal_zero_tax_so_01' });
+    assert.ok(dbRecord);
+    assert.equal(dbRecord.salesOrderSubtotal, 120000.0);
+    assert.equal(dbRecord.salesOrderTax, 0.0);
+    assert.equal(dbRecord.salesOrderTotal, 120000.0);
+    assert.equal(dbRecord.salesOrderStatus, 'CONFIRMED');
+  });
+
+  test('Rule 22: Explicit taxPercentage = 5.0 preserves 5% VAT with tax_id', async () => {
+    const mockClient = createMockZohoClient();
+    const res = await SalesOrderService.createAndConfirmSalesOrder({
+      crmDealId: 'deal_explicit_5pct_so_01',
+      zohoContactId: 'cust_real_4001',
+      dealName: 'NovaTech 5% VAT Deal',
+      amount: 120000.0,
+      currencyCode: 'AED',
+      taxPercentage: 5.0,
+      taxId: 'tax_uae_vat_5_pct',
+      injectedZohoClient: mockClient
+    });
+
+    assert.equal(res.status, 'CONFIRMED');
+    assert.equal(res.salesOrderSubtotal, 120000.0);
+    assert.equal(res.salesOrderTax, 6000.0);
+    assert.equal(res.salesOrderTotal, 126000.0);
+
+    const postCall = mockClient.calls.find((c) => c.method === 'POST' && c.path === '/salesorders');
+    assert.ok(postCall);
+    assert.equal(postCall.body.line_items[0].tax_id, 'tax_uae_vat_5_pct');
+    assert.match(postCall.body.notes, /5% VAT: AED 6000\.00/);
+  });
 });
 

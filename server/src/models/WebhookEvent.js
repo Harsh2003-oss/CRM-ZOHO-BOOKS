@@ -37,6 +37,34 @@ const WebhookEventSchema = new mongoose.Schema(
     processedAt: {
       type: Date,
       default: null
+    },
+    attempts: {
+      type: Number,
+      default: 0,
+      index: true
+    },
+    maxAttempts: {
+      type: Number,
+      default: 3
+    },
+    lastAttemptAt: {
+      type: Date,
+      default: null
+    },
+    lockedBy: {
+      type: String,
+      default: null,
+      index: true
+    },
+    leaseExpiresAt: {
+      type: Date,
+      default: null,
+      index: true
+    },
+    nextAttemptAfter: {
+      type: Date,
+      default: null,
+      index: true
     }
   },
   {

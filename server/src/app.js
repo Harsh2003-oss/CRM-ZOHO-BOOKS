@@ -9,9 +9,48 @@ const operatorRoutes = require('./routes/operatorRoutes');
 
 const app = express();
 
+/**
+ * Configure Express reverse-proxy trust settings.
+ * Fails safely by refusing to blindly trust all upstream proxies.
+ * Requires explicit TRUST_PROXY configuration in production (e.g. 1 for ALB/Render/Railway, or trusted CIDR).
+ * Preserves local development and test behavior by defaulting to 'loopback' in non-production.
+ */
+function configureTrustProxy(appInstance) {
+  const rawTrustProxy = process.env.TRUST_PROXY;
+  const isProd = process.env.NODE_ENV === 'production';
+
+  if (rawTrustProxy !== undefined && rawTrustProxy !== '') {
+    const trimmed = rawTrustProxy.trim();
+    if (trimmed.toLowerCase() === 'false' || trimmed === '0') {
+      appInstance.set('trust proxy', false);
+    } else if (trimmed.toLowerCase() === 'true') {
+      appInstance.set('trust proxy', true);
+    } else if (/^\d+$/.test(trimmed)) {
+      appInstance.set('trust proxy', parseInt(trimmed, 10));
+    } else {
+      appInstance.set('trust proxy', trimmed);
+    }
+  } else if (isProd) {
+    // Fail safely in production: do NOT guess that 1 hop is correct when topology is unestablished.
+    appInstance.set('trust proxy', false);
+    console.warn('[SECURITY CONFIG] TRUST_PROXY is not configured in production. Defaulting safely to false (untrusted proxy). If deployed behind an ALB, ingress, or reverse proxy, configure TRUST_PROXY (e.g. TRUST_PROXY=1) in your environment.');
+  } else {
+    // Preserve local development and test behavior
+    appInstance.set('trust proxy', 'loopback');
+  }
+}
+
+configureTrustProxy(app);
+
 // Middlewares
 app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf, encoding) => {
+    // Preserve raw request body exactly as transmitted for HMAC signature validation
+    req.rawBody = buf ? buf.toString(encoding || 'utf8') : '';
+  }
+}));
 
 // Request logging (sanitized)
 app.use((req, res, next) => {

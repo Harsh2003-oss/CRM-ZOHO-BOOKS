@@ -135,7 +135,7 @@ class SalesOrderService {
     currencyCode = 'AED',
     currencyId = null,
     taxId = null,
-    taxPercentage = 5.0,
+    taxPercentage = null,
     itemId = null,
     workerId = null,
     leaseDurationMs = 5 * 60 * 1000,
@@ -150,6 +150,17 @@ class SalesOrderService {
     // Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID; Fallback: ZOHO_BOOKS_* aliases
     const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
     const configuredCurrencyId = currencyId || process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
+    let effectiveTaxPercentage;
+    if (taxPercentage !== undefined && taxPercentage !== null) {
+      effectiveTaxPercentage = Number(taxPercentage);
+    } else if (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '') {
+      effectiveTaxPercentage = Number(process.env.VAT_PERCENTAGE);
+    } else if (process.env.TAX_PERCENTAGE !== undefined && process.env.TAX_PERCENTAGE !== '') {
+      effectiveTaxPercentage = Number(process.env.TAX_PERCENTAGE);
+    } else {
+      effectiveTaxPercentage = 5.0;
+    }
 
     // Always generate an internal unique execution ID even if caller provided workerId
     // Retains caller's prefix for tracing but guarantees zero shared worker IDs across concurrent callers
@@ -172,6 +183,9 @@ class SalesOrderService {
         zohoSalesOrderId: existingSync.zohoSalesOrderId,
         zohoSalesOrderNumber: existingSync.zohoSalesOrderNumber,
         salesOrderTotal: existingSync.salesOrderTotal,
+        salesOrderSubtotal: existingSync.salesOrderSubtotal,
+        salesOrderTax: existingSync.salesOrderTax,
+        currencyCode: existingSync.currencyCode,
         fromCache: true
       };
     }
@@ -217,7 +231,7 @@ class SalesOrderService {
     try {
       // Precise mathematical calculation using integer minor units (fils / cents)
       const subtotalMinor = Math.round(Number(amount) * 100);
-      const taxMinor = Math.round(subtotalMinor * (taxPercentage / 100));
+      const taxMinor = Math.round(subtotalMinor * (effectiveTaxPercentage / 100));
       const grossMinor = subtotalMinor + taxMinor;
 
       const expectedSubtotal = subtotalMinor / 100;
@@ -265,16 +279,17 @@ class SalesOrderService {
           lineItem.item_id = itemId;
         }
 
-        if (configuredTaxId) {
+        if (configuredTaxId && effectiveTaxPercentage > 0) {
           lineItem.tax_id = configuredTaxId;
         }
 
+        const vatLabel = effectiveTaxPercentage === 0 ? 'VAT (0%)' : `${effectiveTaxPercentage}% VAT`;
         const createPayload = {
           customer_id: zohoContactId,
           reference_number: deterministicRef,
           date: new Date().toISOString().split('T')[0],
           line_items: [lineItem],
-          notes: `Synced from HubSpot Deal ${crmDealId}. Subtotal: AED ${(subtotalMinor / 100).toFixed(2)}, 5% VAT: AED ${(taxMinor / 100).toFixed(2)}, Gross: AED ${(grossMinor / 100).toFixed(2)}.`
+          notes: `Synced from HubSpot Deal ${crmDealId}. Subtotal: AED ${(subtotalMinor / 100).toFixed(2)}, ${vatLabel}: AED ${(taxMinor / 100).toFixed(2)}, Gross: AED ${(grossMinor / 100).toFixed(2)}.`
         };
 
         if (configuredCurrencyId) {

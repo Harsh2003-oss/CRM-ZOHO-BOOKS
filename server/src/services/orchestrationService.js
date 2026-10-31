@@ -87,7 +87,7 @@ async function updateHubSpotDealWithRetry(client, dealId, properties, { maxRetri
  * Aggregates financial metrics across all confirmed milestone invoices for a deal.
  */
 async function calculateAggregateFinancialMetrics(crmDealId, soGrossAmount, referenceDate = new Date()) {
-  const soGrossMinor = Math.round(Number(soGrossAmount || 126000.0) * 100);
+  const soGrossMinor = Math.round(Number((soGrossAmount !== undefined && soGrossAmount !== null) ? soGrossAmount : 126000.0) * 100);
   const confirmedMilestones = await MilestoneInvoice.find({
     crmDealId,
     status: { $in: ['CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID'] }
@@ -277,7 +277,9 @@ class OrchestrationService {
     workerId = null,
     leaseDurationMs = 5 * 60 * 1000,
     heartbeatIntervalMs = null,
-    referenceDate = null
+    referenceDate = null,
+    taxPercentage = null,
+    taxId = null
   }) {
     if (!crmDealId) {
       throw new Error('crmDealId is required for orchestration.');
@@ -409,9 +411,21 @@ class OrchestrationService {
         }
       );
 
-      // Resolve tax and currency configuration from environment (Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID)
-      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      // Resolve tax and currency configuration from parameters or environment
+      // Primary: ZOHO_UAE_VAT_TAX_ID & ZOHO_AED_CURRENCY_ID; Fallback: ZOHO_BOOKS_* aliases
+      const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
       const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
+      let effectiveTaxPercentage;
+      if (taxPercentage !== undefined && taxPercentage !== null) {
+        effectiveTaxPercentage = Number(taxPercentage);
+      } else if (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.VAT_PERCENTAGE);
+      } else if (process.env.TAX_PERCENTAGE !== undefined && process.env.TAX_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.TAX_PERCENTAGE);
+      } else {
+        effectiveTaxPercentage = 5.0;
+      }
 
       // Create Sales Order
       let salesOrderResult;
@@ -423,6 +437,7 @@ class OrchestrationService {
           amount: contractAmount,
           currencyCode: 'AED',
           taxId: configuredTaxId,
+          taxPercentage: effectiveTaxPercentage,
           currencyId: configuredCurrencyId,
           workerId: executionWorkerId,
           injectedZohoClient: zClient
@@ -453,6 +468,7 @@ class OrchestrationService {
           contractAmount,
           currencyCode: 'AED',
           taxId: configuredTaxId,
+          taxPercentage: effectiveTaxPercentage,
           currencyId: configuredCurrencyId,
           workerId: executionWorkerId,
           injectedZohoClient: zClient
@@ -606,7 +622,9 @@ class OrchestrationService {
     heartbeatIntervalMs = null,
     injectedHubSpotClient = null,
     injectedZohoClient = null,
-    referenceDate = null
+    referenceDate = null,
+    taxPercentage = null,
+    taxId = null
   }) {
     if (!crmDealId) {
       throw new Error('crmDealId is required for Go-Live milestone processing.');
@@ -721,8 +739,19 @@ class OrchestrationService {
       );
 
       // Create M2 Invoice (30% Go-Live)
-      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
       const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
+      let effectiveTaxPercentage;
+      if (taxPercentage !== undefined && taxPercentage !== null) {
+        effectiveTaxPercentage = Number(taxPercentage);
+      } else if (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.VAT_PERCENTAGE);
+      } else if (process.env.TAX_PERCENTAGE !== undefined && process.env.TAX_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.TAX_PERCENTAGE);
+      } else {
+        effectiveTaxPercentage = 5.0;
+      }
 
       const invRes = await InvoiceService.createMilestone2Invoice({
         crmDealId,
@@ -730,6 +759,7 @@ class OrchestrationService {
         contractAmount: dealProps.amount ? Number(dealProps.amount) : syncRecord.salesOrderSubtotal,
         currencyCode: syncRecord.currencyCode || 'AED',
         taxId: configuredTaxId,
+        taxPercentage: effectiveTaxPercentage,
         currencyId: configuredCurrencyId,
         workerId: executionWorkerId,
         injectedZohoClient: zClient
@@ -790,7 +820,9 @@ class OrchestrationService {
     heartbeatIntervalMs = null,
     injectedHubSpotClient = null,
     injectedZohoClient = null,
-    referenceDate = null
+    referenceDate = null,
+    taxPercentage = null,
+    taxId = null
   }) {
     if (!crmDealId) {
       throw new Error('crmDealId is required for 90-Day milestone processing.');
@@ -888,14 +920,26 @@ class OrchestrationService {
       }
 
       // Eligible: Create M3 Invoice (20%)
-      const configuredTaxId = process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
+      const configuredTaxId = taxId || process.env.ZOHO_UAE_VAT_TAX_ID || process.env.ZOHO_BOOKS_UAE_VAT_TAX_ID || null;
       const configuredCurrencyId = process.env.ZOHO_AED_CURRENCY_ID || process.env.ZOHO_BOOKS_AED_CURRENCY_ID || null;
+
+      let effectiveTaxPercentage;
+      if (taxPercentage !== undefined && taxPercentage !== null) {
+        effectiveTaxPercentage = Number(taxPercentage);
+      } else if (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.VAT_PERCENTAGE);
+      } else if (process.env.TAX_PERCENTAGE !== undefined && process.env.TAX_PERCENTAGE !== '') {
+        effectiveTaxPercentage = Number(process.env.TAX_PERCENTAGE);
+      } else {
+        effectiveTaxPercentage = 5.0;
+      }
 
       const invRes = await InvoiceService.createMilestone3Invoice({
         crmDealId,
         contractAmount: syncRecord.salesOrderSubtotal || 120000.0,
         currencyCode: syncRecord.currencyCode || 'AED',
         taxId: configuredTaxId,
+        taxPercentage: effectiveTaxPercentage,
         currencyId: configuredCurrencyId,
         workerId: executionWorkerId,
         injectedZohoClient: zClient
@@ -986,8 +1030,23 @@ class OrchestrationService {
   /**
    * Processes the next queued CRM WebhookEvent through orchestration.
    */
-  static async processNextQueuedEvent({ injectedHubSpotClient = null, injectedZohoClient = null } = {}) {
-    const claimedEvent = await QueueService.claimNextEvent('CRM');
+  static async processNextQueuedEvent({
+    injectedHubSpotClient = null,
+    injectedZohoClient = null,
+    workerId = null,
+    allowedEventIds = null,
+    ignoredEventIds = null,
+    claimedEvent: preClaimedEvent = null,
+    maxAttempts = 3,
+    baseRetryDelayMs = 1000,
+    taxPercentage = null,
+    taxId = null
+  } = {}) {
+    const claimedEvent = preClaimedEvent || await QueueService.claimNextEvent('CRM', {
+      workerId,
+      allowedEventIds,
+      ignoredEventIds
+    });
     if (!claimedEvent) {
       return null;
     }
@@ -995,7 +1054,10 @@ class OrchestrationService {
     const payload = claimedEvent.payload || {};
     const crmDealId = String(payload.objectId || payload.dealId || '');
     if (!crmDealId) {
-      await QueueService.markFailed(claimedEvent.eventId, 'Missing deal ID in webhook payload');
+      const missingErr = new Error('Missing deal ID in webhook payload');
+      missingErr.isPermanent = true;
+      missingErr.code = 'MISSING_DEAL_ID';
+      await QueueService.handleEventFailure(claimedEvent.eventId, missingErr, { isRetryable: false });
       return { status: 'FAILED', reason: 'Missing deal ID' };
     }
 
@@ -1013,20 +1075,29 @@ class OrchestrationService {
           crmDealId,
           goLiveDate: payload.propertyValue,
           injectedHubSpotClient,
-          injectedZohoClient
+          injectedZohoClient,
+          workerId,
+          taxPercentage,
+          taxId
         });
       } else {
         result = await this.processClosedWonDeal({
           crmDealId,
           injectedHubSpotClient,
-          injectedZohoClient
+          injectedZohoClient,
+          workerId,
+          taxPercentage,
+          taxId
         });
       }
 
       await QueueService.markCompleted(claimedEvent.eventId);
       return { eventId: claimedEvent.eventId, crmDealId, result };
     } catch (err) {
-      await QueueService.markFailed(claimedEvent.eventId, err.message);
+      await QueueService.handleEventFailure(claimedEvent.eventId, err, {
+        maxAttempts,
+        baseDelayMs: baseRetryDelayMs
+      });
       throw err;
     }
   }

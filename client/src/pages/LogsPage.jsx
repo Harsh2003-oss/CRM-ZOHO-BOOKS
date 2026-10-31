@@ -10,22 +10,26 @@ export default function LogsPage({ logsData, eventsData, logsFilter, onFilterCha
     <div className="space-y-6">
       {/* Queue Summary Banner */}
       {queueStats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">RECEIVED (Queue)</p>
-            <p className="text-lg font-bold text-sky-600 mt-1">{queueStats.received || 0}</p>
+            <p className="text-lg font-bold text-sky-600 mt-1">{queueStats.RECEIVED ?? queueStats.received ?? 0}</p>
           </div>
           <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">PROCESSING (Active)</p>
-            <p className="text-lg font-bold text-amber-600 mt-1">{queueStats.processing || 0}</p>
+            <p className="text-lg font-bold text-amber-600 mt-1">{queueStats.PROCESSING ?? queueStats.processing ?? 0}</p>
           </div>
           <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">PROCESSED (Completed)</p>
-            <p className="text-lg font-bold text-emerald-600 mt-1">{queueStats.processed || 0}</p>
+            <p className="text-lg font-bold text-emerald-600 mt-1">{queueStats.PROCESSED ?? queueStats.processed ?? 0}</p>
           </div>
           <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
             <p className="text-xs font-semibold text-slate-500">FAILED (Action Needed)</p>
-            <p className="text-lg font-bold text-rose-600 mt-1">{queueStats.failed || 0}</p>
+            <p className="text-lg font-bold text-rose-600 mt-1">{queueStats.FAILED ?? queueStats.failed ?? 0}</p>
+          </div>
+          <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+            <p className="text-xs font-semibold text-slate-500">IGNORED (Filtered)</p>
+            <p className="text-lg font-bold text-slate-600 mt-1">{queueStats.IGNORED ?? queueStats.ignored ?? 0}</p>
           </div>
         </div>
       )}
