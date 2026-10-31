@@ -50,7 +50,7 @@ A decoupled, asynchronous integration gateway providing:
 | **Persistence** | MongoDB, Mongoose 9.0 | Unique partial indexes, compound constraints, atomic lease locking |
 | **Queue & Workers** | MongoDB Durable FIFO Queue | Distributed lease timeouts, fencing tokens, exponential jittered backoff |
 | **Integrations** | HubSpot CRM API v3, Zoho Books API v3 | Multi-region OAuth auto-refresher (5-min pre-expiry), Token Bucket limiter |
-| **Testing** | Node.js Native Test Runner (`node:test`), Supertest | 153 tests across 11 suites with in-memory MongoDB |
+| **Testing** | Node.js Native Test Runner (`node:test`), Supertest | 203 tests across 14 suites with in-memory MongoDB |
 
 ---
 
@@ -203,6 +203,8 @@ cp .env.example .env
 | `ZOHO_WEBHOOK_SECRET` | Secret token verifying Zoho webhooks | `your_zoho_webhook_token_secret` |
 | `OPERATOR_API_KEY` | Header/bearer key for Operator Actions | `your_secure_operator_api_key` |
 | `DEFAULT_CURRENCY` | Default Sales Order currency | `AED` |
+| `VAT_PERCENTAGE` | Configurable VAT percentage (`0` disables VAT line items; `5.0` default if unset) | `0` |
+| `ZOHO_UAE_VAT_TAX_ID` | Zoho Books tax entity ID for line item VAT (optional) | `your_vat_tax_id_here` |
 
 > [!IMPORTANT]
 > **Operator Authentication Security**:
@@ -287,7 +289,7 @@ This seeds:
 
 ## Automated Testing Suite
 
-The project includes 156 comprehensive tests executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
+The project includes 203 comprehensive tests across 14 suites executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
 
 ```bash
 npm test
@@ -297,16 +299,17 @@ npm test
 | Suite File | Scope | Test Count |
 | :--- | :--- | :---: |
 | `tests/phase1.test.js` | Schema Constraints, OAuth Mutex, Rate Limiter, Health Check | 10 |
-| `tests/phase2_step1_webhook.test.js` | Webhook ingestion (<50ms), queue locking, deduplication | 5 |
+| `tests/phase2_step1_webhook.test.js` | Webhook ingestion (<50ms), queue locking, deduplication, Signature v3 | 23 |
 | `tests/phase3_customerMatching.test.js` | Customer matching rules (exact, auto-create, ambiguous) | 10 |
-| `tests/phase3_invoice.test.js` | Sales Order linkage, M1 calculation, timeout reconciliation | 20 |
-| `tests/phase3_orchestration.test.js` | End-to-end HubSpot sync, string property casting, UTC date logic | 25 |
-| `tests/phase3_salesOrder.test.js` | Sales Order draft, confirmation, lease locks, crash recovery | 18 |
-| `tests/phase3_step5_milestones.test.js` | M2 Go-Live, M3 90-Day time guard, sequential enforcement | 24 |
-| `tests/phase4_payments.test.js` | Payments, partial payments, reversals, refunds, minor units | 44 |
-| `tests/phase5_dashboard.test.js` | KPI calculation, 5 aging buckets, operator auth, Vite bundle | 15 |
-| `tests/phase6_seed.test.js` | Seed dataset verification, idempotency, production safeguard | 3 |
-| **TOTAL VERIFIED TESTS** | **12 Test Suites Across 10 Test Files** | **156 Passed (0 Failed)** |
+| `tests/phase3_invoice.test.js` | Sales Order linkage, M1 calculation, timeout reconciliation | 30 |
+| `tests/phase3_orchestration.test.js` | End-to-end HubSpot sync, string property casting, UTC date logic | 30 |
+| `tests/phase3_salesOrder.test.js` | Sales Order draft, confirmation, lease locks, crash recovery | 24 |
+| `tests/phase3_step5_milestones.test.js` | M2 Go-Live, M3 90-Day time guard, sequential enforcement | 12 |
+| `tests/phase4_payments.test.js` | Payments, partial payments, reversals, refunds, minor units | 31 |
+| `tests/phase5_dashboard.test.js` | KPI calculation, 5 aging buckets, operator auth, Vite bundle | 16 |
+| `tests/phase6_seed.test.js` | Seed dataset verification, idempotency, production safeguard | 4 |
+| `tests/worker.test.js` | Dedicated Queue Worker, lease locking, fencing tokens, backoff | 13 |
+| **TOTAL VERIFIED TESTS** | **14 Test Suites Across 11 Test Files** | **203 Passed (0 Failed)** |
 
 ---
 
@@ -363,12 +366,20 @@ If a network timeout occurs while creating a Sales Order or Invoice in Zoho Book
 ## External Account Facts & Known Limitations
 
 > [!WARNING]
-> **Zoho Books India Datacenter & UAE VAT Limitation**
+> **Zoho Books Organization Edition & Tax Compliance Notice**
 > 
-> The active Zoho Books trial organization used for live API verification is provisioned in the **India datacenter (`in` / accounts.zoho.in)** under Org ID `60093852869`.
-> - **Verified Fact**: The India datacenter strictly enforces Indian GST compliance schemas and restricts the creation of official UAE Federal Tax Authority (FTA) 5% VAT rate entities.
-> - **Implementation Behavior**: The integration's core financial engine natively implements full UAE 5% VAT calculations, fractional item rates, and integer-cent rounding. In the live India sandbox, API calls use standard available tax rates or zero-tax line items with calculated gross rates.
-> - **Production Readiness**: When connected to a standard Zoho Books UAE organization (`accounts.zoho.com` / UAE edition), the gateway operates with 100% native UAE FTA VAT compliance without code modification.
+> - **Tested Organization**: The live integration test was conducted against a Zoho Books India-edition organization (`in` / accounts.zoho.in, Org ID `60093852869`).
+> - **Live Test Verification**: The live NovaTech Sales Order (`SO-00002`) and Milestone 1 invoice (`INV-000003`) were created with 0% VAT.
+> - **UAE 5% VAT & FTA Status**: UAE 5% VAT invoice creation and UAE Federal Tax Authority (FTA) compliance have **not** been verified in a UAE-edition Zoho Books organization.
+> - **Tax Calculation Support vs. Compliance**: The codebase natively supports configurable tax calculations, integer-cent rounding, and tax ID resolution (controlled via the verified `VAT_PERCENTAGE` environment variable, with fallback `TAX_PERCENTAGE` and `ZOHO_UAE_VAT_TAX_ID`). However, application-level tax calculation and configuration support do not themselves establish legal tax compliance.
+> - **Production Deployment**: Actual tax application and invoice compliance depend on connecting to a Zoho Books UAE-edition organization with appropriate tax configuration and a valid business Tax Registration Number (TRN).
+
+> [!NOTE]
+> **Milestone 3 (90-Day Post Go-Live) Scheduling Architecture**
+>
+> - **Eligibility Calculation**: Milestone 3 eligibility is calculated deterministically as `confirmed_go_live_date` + 90 calendar days (`m3EligibleAt`). Any invocation before this exact timestamp strictly fails closed with `status: "M3_NOT_YET_ELIGIBLE"` and returns the exact number of remaining days.
+> - **Evaluator Implementation**: The core M3 business logic and boundary evaluator are fully implemented in `OrchestrationService.process90DayMilestone` and verified with automated test suites.
+> - **No Built-in Daily Scheduler**: There is currently no built-in daily background cron daemon running inside the server process. Milestone 3 evaluation must be triggered through an API/webhook or an external scheduler such as AWS EventBridge, Google Cloud Scheduler, or GitHub Actions scheduled workflows. Automatic background scheduling is not implemented in-process.
 
 ---
 
