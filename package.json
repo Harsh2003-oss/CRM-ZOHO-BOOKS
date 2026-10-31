@@ -5,6 +5,10 @@
   "main": "server/src/server.js",
   "scripts": {
     "start": "node server/src/server.js",
+    "build": "npm run build --prefix client",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"SERVER,CLIENT\" -c \"blue,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "node server/src/server.js",
+    "dev:client": "npm run dev --prefix client",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "test:step2-1": "node scripts/simulateHubSpotWebhook.js",
     "test:step3-1": "node scripts/testCustomerMatching.js",
@@ -13,6 +17,7 @@
     "test:step3-4": "node --test tests/phase3_orchestration.test.js",
     "test:step3-5": "node --test tests/phase3_step5_milestones.test.js",
     "test:phase4": "node --test tests/phase4_payments.test.js",
+    "test:phase5": "node --test tests/phase5_dashboard.test.js",
     "setup:hubspot": "node scripts/setupHubSpotProperties.js"
   },
   "keywords": [],
@@ -26,6 +31,7 @@
     "morgan": "^1.10.1"
   },
   "devDependencies": {
+    "concurrently": "^10.0.6",
     "mongodb-memory-server": "^11.3.0",
     "supertest": "^7.2.2"
   }
