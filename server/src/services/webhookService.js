@@ -129,6 +129,91 @@ class WebhookService {
 
     return { accepted, ignored, duplicates, total: events.length };
   }
+
+  /**
+   * Generates a deterministic event ID for incoming Zoho Books webhooks.
+   */
+  static generateZohoEventId(event) {
+    if (event.eventId) return `zoho_${event.eventId}`;
+    const rawPayment = event.payment || event;
+    const rawRefund = event.refund || event;
+    const refundId = String(rawRefund.refund_id || rawRefund.refundId || event.refund_id || '').trim();
+    const paymentId = String(rawPayment.payment_id || rawPayment.paymentId || event.payment_id || event.id || '').trim();
+    const eventType = String(event.event_type || event.event || (refundId ? 'payment_refunded' : 'payment_created')).trim();
+    const occurredAt = event.occurredAt || event.timestamp || '';
+
+    if (refundId) {
+      const raw = `ref_${refundId}_${paymentId}_${occurredAt}`;
+      const hash = crypto.createHash('sha256').update(raw).digest('hex').substring(0, 16);
+      return `zoho_ref_${refundId}_${hash}`;
+    }
+
+    const raw = `${paymentId}_${eventType}_${occurredAt}`;
+    const hash = crypto.createHash('sha256').update(raw).digest('hex').substring(0, 16);
+    return `zoho_pay_${paymentId || hash}_${hash}`;
+  }
+
+  /**
+   * Ingests and persists incoming Zoho Books webhooks with deduplication.
+   */
+  static async processZohoWebhook(rawBody) {
+    const events = this.normalizePayload(rawBody);
+    if (!events || events.length === 0) {
+      const err = new Error('Invalid webhook payload: Empty payload array or object.');
+      err.code = 'INVALID_PAYLOAD';
+      throw err;
+    }
+
+    let accepted = 0;
+    let duplicates = 0;
+    let ignored = 0;
+
+    for (const event of events) {
+      const rawPayment = event.payment || event;
+      const rawRefund = event.refund || event;
+      const paymentId = rawPayment.payment_id || rawPayment.paymentId || event.payment_id || event.id;
+      const refundId = rawRefund.refund_id || rawRefund.refundId || event.refund_id;
+
+      if (!paymentId && !refundId) {
+        ignored++;
+        continue;
+      }
+
+      const eventId = this.generateZohoEventId(event);
+      const existing = await WebhookEvent.findOne({ eventId });
+      if (existing) {
+        duplicates++;
+        continue;
+      }
+
+      const eventType = String(event.event_type || event.event || (refundId ? 'payment_refunded' : 'payment_created')).trim();
+
+      try {
+        await WebhookEvent.create({
+          eventId,
+          source: 'ZOHO_BOOKS',
+          eventType,
+          status: 'RECEIVED',
+          payload: event
+        });
+        accepted++;
+      } catch (err) {
+        if (err.code === 11000) {
+          duplicates++;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (accepted === 0 && duplicates === 0 && ignored > 0) {
+      const err = new Error('No valid payment or refund identifier found in webhook payload.');
+      err.code = 'INVALID_PAYLOAD';
+      throw err;
+    }
+
+    return { accepted, ignored, duplicates, total: events.length };
+  }
 }
 
 module.exports = WebhookService;

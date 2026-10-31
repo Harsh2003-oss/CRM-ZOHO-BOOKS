@@ -12,6 +12,7 @@
     "test:step3-3": "node --test tests/phase3_invoice.test.js",
     "test:step3-4": "node --test tests/phase3_orchestration.test.js",
     "test:step3-5": "node --test tests/phase3_step5_milestones.test.js",
+    "test:phase4": "node --test tests/phase4_payments.test.js",
     "setup:hubspot": "node scripts/setupHubSpotProperties.js"
   },
   "keywords": [],

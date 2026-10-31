@@ -90,7 +90,7 @@ async function calculateAggregateFinancialMetrics(crmDealId, soGrossAmount, refe
   const soGrossMinor = Math.round(Number(soGrossAmount || 126000.0) * 100);
   const confirmedMilestones = await MilestoneInvoice.find({
     crmDealId,
-    status: { $in: ['CREATED', 'SENT', 'PAID'] }
+    status: { $in: ['CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID'] }
   }).sort({ milestoneIndex: 1 });
 
   let totalInvoicedMinor = 0;
@@ -98,6 +98,14 @@ async function calculateAggregateFinancialMetrics(crmDealId, soGrossAmount, refe
   let totalBalanceMinor = 0;
 
   for (const m of confirmedMilestones) {
+    if (m.currencyCode && m.currencyCode !== 'AED') {
+      const err = new Error(
+        `Currency mismatch in deal financial aggregation: Milestone invoice ${m.zohoInvoiceId} has currency '${m.currencyCode}', expected 'AED'. Multi-currency aggregation without exchange rate conversion is disallowed.`
+      );
+      err.code = 'CURRENCY_MISMATCH';
+      throw err;
+    }
+
     totalInvoicedMinor += Math.round(Number(m.totalAmount || 0) * 100);
     if (m.balance === undefined || m.balance === null || isNaN(m.balance)) {
       hasUnknownBalance = true;
@@ -117,14 +125,14 @@ async function calculateAggregateFinancialMetrics(crmDealId, soGrossAmount, refe
   let amountInvoicedUnpaid = totalInvoiced;
 
   if (!hasUnknownBalance && confirmedMilestones.length > 0) {
-    amountInvoicedUnpaid = totalBalanceMinor / 100;
+    amountInvoicedUnpaid = Math.max(0, totalBalanceMinor / 100);
     if (totalBalanceMinor === totalInvoicedMinor) {
       amountCollected = 0.0;
       percentageCollected = 0.0;
       paymentStatus = 'UNPAID';
     } else if (totalBalanceMinor >= 0 && totalBalanceMinor < totalInvoicedMinor) {
       const collectedMinor = totalInvoicedMinor - totalBalanceMinor;
-      amountCollected = collectedMinor / 100;
+      amountCollected = Math.max(0, collectedMinor / 100);
       percentageCollected = soGrossMinor > 0 ? Math.round((collectedMinor / soGrossMinor) * 10000) / 100 : 0;
       paymentStatus = totalBalanceMinor === 0 ? 'PAID' : 'PARTIALLY_PAID';
     }

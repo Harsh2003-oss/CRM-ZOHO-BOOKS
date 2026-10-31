@@ -538,7 +538,7 @@ class InvoiceService {
       // Aggregate cumulative confirmed milestone invoices
       const confirmedMilestones = await MilestoneInvoice.find({
         crmDealId,
-        status: { $in: ['CREATED', 'SENT', 'PAID'] }
+        status: { $in: ['CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID'] }
       });
 
       const cumulativeGrossMinor = confirmedMilestones.reduce(
@@ -691,7 +691,7 @@ class InvoiceService {
       );
 
       const targetStatus = mIndex === 1 ? 'M1_INVOICED' : (mIndex === 2 ? 'M2_INVOICED' : 'M3_INVOICED');
-      const allConfirmed = await MilestoneInvoice.find({ crmDealId, status: { $in: ['CREATED', 'SENT', 'PAID'] } });
+      const allConfirmed = await MilestoneInvoice.find({ crmDealId, status: { $in: ['CREATED', 'SENT', 'PAID', 'PARTIALLY_PAID'] } });
       const totalInvoicedMinor = allConfirmed.reduce((sum, inv) => sum + Math.round(Number(inv.totalAmount || 0) * 100), 0);
       const soGrossMinor = Math.round(Number(syncRecord.salesOrderTotal || 126000) * 100);
       const remainingNotInvoicedMinor = Math.max(0, soGrossMinor - totalInvoicedMinor);
