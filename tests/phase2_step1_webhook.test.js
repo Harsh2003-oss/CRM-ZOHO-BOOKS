@@ -697,5 +697,23 @@ test.describe('HubSpot Webhook Signature v3 Security & Verification', () => {
       app.set('trust proxy', origTrust);
     }
   });
+
+  test('Public Ingress Gateway: Exposes only webhooks/health and blocks internal dashboard/operator endpoints', async () => {
+    const ingressGateway = require('../scripts/webhookIngressGateway');
+
+    // 1. Blocks dashboard endpoints
+    const resDash = await request(ingressGateway).get('/api/dashboard/summary');
+    assert.equal(resDash.status, 404);
+    assert.equal(resDash.body.error, 'ROUTE_NOT_FOUND');
+
+    // 2. Blocks operator endpoints
+    const resOp = await request(ingressGateway).post('/api/operator/retry-event/evt_101');
+    assert.equal(resOp.status, 404);
+    assert.equal(resOp.body.error, 'ROUTE_NOT_FOUND');
+
+    // 3. Blocks random endpoints
+    const resRandom = await request(ingressGateway).get('/admin');
+    assert.equal(resRandom.status, 404);
+  });
 });
 

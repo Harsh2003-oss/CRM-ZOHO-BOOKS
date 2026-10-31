@@ -67,18 +67,30 @@ app.use((req, res, next) => {
 // Mount Routes
 app.use('/api', healthRoutes);
 app.use('/api/webhooks', webhookRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/operator', operatorRoutes);
 
-// Serve static frontend assets for Dashboard (React + Vite production build)
-const clientDistPath = path.join(__dirname, '../../client/dist');
-const publicFallbackPath = path.join(__dirname, '../public');
-const dashboardStaticPath = fs.existsSync(clientDistPath) ? clientDistPath : publicFallbackPath;
+if (process.env.WEBHOOK_INGRESS_ONLY === 'true') {
+  // Public Ingress Isolation: Block dashboard, operator, and administrative routes
+  app.use((req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'ROUTE_NOT_EXPOSED',
+      message: 'This public ingress gateway exposes webhook endpoints exclusively.'
+    });
+  });
+} else {
+  app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/operator', operatorRoutes);
 
-app.use('/dashboard', express.static(dashboardStaticPath));
-app.get(/^\/dashboard(\/.*)?$/, (req, res) => {
-  res.sendFile(path.join(dashboardStaticPath, 'index.html'));
-});
+  // Serve static frontend assets for Dashboard (React + Vite production build)
+  const clientDistPath = path.join(__dirname, '../../client/dist');
+  const publicFallbackPath = path.join(__dirname, '../public');
+  const dashboardStaticPath = fs.existsSync(clientDistPath) ? clientDistPath : publicFallbackPath;
+
+  app.use('/dashboard', express.static(dashboardStaticPath));
+  app.get(/^\/dashboard(\/.*)?$/, (req, res) => {
+    res.sendFile(path.join(dashboardStaticPath, 'index.html'));
+  });
+}
 
 // Root route
 app.get('/', (req, res) => {

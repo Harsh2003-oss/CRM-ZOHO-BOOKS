@@ -53,7 +53,7 @@ function createMockHubSpotClient({ dealStage = 'closedwon', dealAmount = 120000.
   };
 }
 
-function createMockZohoClient({ slowDelayMs = 0 } = {}) {
+function createMockZohoClient({ slowDelayMs = 0, taxPercentage = null } = {}) {
   const calls = [];
   return {
     calls,
@@ -62,6 +62,10 @@ function createMockZohoClient({ slowDelayMs = 0 } = {}) {
       if (slowDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, slowDelayMs));
       }
+
+      const effectiveTaxRate = taxPercentage !== null
+        ? Number(taxPercentage)
+        : (process.env.VAT_PERCENTAGE !== undefined && process.env.VAT_PERCENTAGE !== '' ? Number(process.env.VAT_PERCENTAGE) : 5.0);
 
       if (method === 'GET' && path.startsWith('/contacts')) {
         return { statusCode: 200, data: { code: 0, contacts: [] } };
@@ -74,7 +78,7 @@ function createMockZohoClient({ slowDelayMs = 0 } = {}) {
       }
       if (method === 'POST' && path === '/salesorders') {
         const rate = body?.line_items?.[0]?.rate || 120000.0;
-        const tax = Number((rate * 0.05).toFixed(2));
+        const tax = Number((rate * (effectiveTaxRate / 100)).toFixed(2));
         const total = Number((rate + tax).toFixed(2));
         return {
           statusCode: 200,
@@ -103,7 +107,7 @@ function createMockZohoClient({ slowDelayMs = 0 } = {}) {
       }
       if (method === 'POST' && path === '/invoices') {
         const rate = body?.line_items?.[0]?.rate || 60000.0;
-        const tax = Number((rate * 0.05).toFixed(2));
+        const tax = Number((rate * (effectiveTaxRate / 100)).toFixed(2));
         const total = Number((rate + tax).toFixed(2));
         return {
           statusCode: 200,

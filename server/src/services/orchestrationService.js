@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const IntegrationSync = require('../models/IntegrationSync');
 const MilestoneInvoice = require('../models/MilestoneInvoice');
 const CustomerService = require('./customerService');
+const ProductService = require('./productService');
 const SalesOrderService = require('./salesOrderService');
 const InvoiceService = require('./invoiceService');
 const QueueService = require('./queueService');
@@ -427,6 +428,54 @@ class OrchestrationService {
         effectiveTaxPercentage = 5.0;
       }
 
+      // Resolve Product / Line Item without guessing
+      let resolvedItemId = null;
+      const associatedLineItems = dealData.associations?.line_items?.results || [];
+      const primaryLineItemId = associatedLineItems[0]?.id || null;
+      const primaryProductName = properties.product_name || properties.hs_product_name || null;
+      const primarySku = properties.product_sku || properties.sku || null;
+
+      if (primaryLineItemId || primaryProductName || primarySku || process.env.REQUIRE_PRODUCT_MAPPING === 'true') {
+        const productResult = await ProductService.resolveProduct({
+          hubspotProductId: primaryLineItemId,
+          productName: primaryProductName,
+          sku: primarySku,
+          crmDealId,
+          injectedZohoClient: zClient
+        });
+
+        if (productResult.status === 'REQUIRES_MANUAL_MATCH') {
+          await IntegrationSync.findOneAndUpdate(
+            { crmDealId, orchestrationLockedBy: executionWorkerId },
+            {
+              $set: {
+                syncStatus: 'REQUIRES_MANUAL_MATCH',
+                failureReason: productResult.reason
+              }
+            }
+          );
+
+          try {
+            await updateHubSpotDealWithRetry(hsClient, crmDealId, {
+              integration_sync_status: 'REQUIRES_MANUAL_MATCH',
+              integration_last_error: productResult.reason
+            });
+          } catch (hsErr) {
+            console.warn('[ORCHESTRATION] Failed to notify HubSpot of product mapping requirement:', hsErr.message);
+          }
+
+          return {
+            status: 'REQUIRES_MANUAL_MATCH',
+            crmDealId,
+            reason: productResult.reason
+          };
+        }
+
+        if (productResult.status === 'RESOLVED') {
+          resolvedItemId = productResult.zohoItemId;
+        }
+      }
+
       // Create Sales Order
       let salesOrderResult;
       try {
@@ -439,6 +488,7 @@ class OrchestrationService {
           taxId: configuredTaxId,
           taxPercentage: effectiveTaxPercentage,
           currencyId: configuredCurrencyId,
+          itemId: resolvedItemId,
           workerId: executionWorkerId,
           injectedZohoClient: zClient
         });
