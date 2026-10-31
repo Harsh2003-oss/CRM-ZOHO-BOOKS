@@ -43,6 +43,32 @@ const IntegrationSyncSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
+    salesOrderSubtotal: {
+      type: Number,
+      default: 0
+    },
+    salesOrderTax: {
+      type: Number,
+      default: 0
+    },
+    salesOrderStatus: {
+      type: String,
+      enum: ['NONE', 'DRAFT', 'CONFIRMED'],
+      default: 'NONE',
+      index: true
+    },
+    lockedBy: {
+      type: String,
+      default: null
+    },
+    lockedAt: {
+      type: Date,
+      default: null
+    },
+    leaseExpiresAt: {
+      type: Date,
+      default: null
+    },
     currencyCode: {
       type: String,
       default: 'AED'
@@ -73,7 +99,7 @@ const IntegrationSyncSchema = new mongoose.Schema(
     },
     syncStatus: {
       type: String,
-      enum: ['PENDING', 'PROCESSING', 'REQUIRES_MANUAL_MATCH', 'SYNCED', 'FAILED'],
+      enum: ['PENDING', 'PROCESSING', 'REQUIRES_MANUAL_MATCH', 'SALES_ORDER_DRAFT', 'SALES_ORDER_CONFIRMED', 'SYNCED', 'FAILED'],
       default: 'PENDING',
       index: true
     },
