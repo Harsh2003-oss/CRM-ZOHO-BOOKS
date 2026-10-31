@@ -18,6 +18,7 @@
     "test:step3-5": "node --test tests/phase3_step5_milestones.test.js",
     "test:phase4": "node --test tests/phase4_payments.test.js",
     "test:phase5": "node --test tests/phase5_dashboard.test.js",
+    "seed": "node scripts/seedDataset.js",
     "setup:hubspot": "node scripts/setupHubSpotProperties.js"
   },
   "keywords": [],

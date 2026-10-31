@@ -23,7 +23,7 @@ import {
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [operatorKey, setOperatorKey] = useState(
-    localStorage.getItem('OPERATOR_KEY') || 'operator_secure_dev_key_2026'
+    localStorage.getItem('OPERATOR_KEY') || ''
   );
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);

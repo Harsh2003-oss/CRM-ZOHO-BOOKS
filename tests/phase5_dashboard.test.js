@@ -387,6 +387,25 @@ test.describe('Phase 5: Integration Dashboard & Operational Monitoring', () => {
       .send({});
     assert.equal(resBadKey.status, 401);
     assert.equal(resBadKey.body.error, 'UNAUTHORIZED_OPERATOR');
+
+    // Production fail-closed when key is missing or insecure default
+    const oldEnv = process.env.NODE_ENV;
+    const oldKey = process.env.OPERATOR_API_KEY;
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.OPERATOR_API_KEY;
+      delete process.env.OPERATOR_KEY;
+
+      const resProdUnconfigured = await request(app)
+        .post('/api/operator/retry-event/some_event_id')
+        .set('x-operator-key', 'any_key')
+        .send({});
+      assert.equal(resProdUnconfigured.status, 503);
+      assert.equal(resProdUnconfigured.body.error, 'OPERATOR_SERVICE_UNCONFIGURED');
+    } finally {
+      process.env.NODE_ENV = oldEnv;
+      if (oldKey) process.env.OPERATOR_API_KEY = oldKey;
+    }
   });
 
   // 11. Authorized Operator Retry Event
