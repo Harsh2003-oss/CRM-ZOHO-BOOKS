@@ -13,19 +13,26 @@ Includes an operational monitoring dashboard built with **React 18 + Vite + Tail
 > - **Live Dashboard (Frontend)**: [https://crm-zoho-books.vercel.app/](https://crm-zoho-books.vercel.app/)
 > - **Production API Gateway (Backend)**: [https://crm-zoho-books.onrender.com](https://crm-zoho-books.onrender.com) (Health: [`/api/health`](https://crm-zoho-books.onrender.com/api/health))
 > - **HubSpot CRM Portal**: [https://app.hubspot.com/](https://app.hubspot.com/) (Portal ID: `247839416`)
-> - **Zoho Books Portal**: [https://books.zoho.in/](https://books.zoho.in/) (Org ID: `60094161014`, Organization: `xyz`, Region: `India (.in)`)
+> - **Zoho Books Portal**: [https://books.zoho.in/](https://books.zoho.in/) (Org ID: `60094206485`, Organization: `Complyance Demo Org`, Region: `India (.in)`)
 > 
 > | Platform | Email | Password | Role / Access |
 > | :--- | :--- | :--- | :--- |
 > | **HubSpot CRM** | `complyance.demo@gmail.com` | `Krharsh@123456` | **Super Admin** (Full CRM access to create deals & manage pipeline) |
-> | **Zoho Books** | `complyance.demo@gmail.com` | `Krharsh@12` | **Admin** (Org ID: `60094161014`, Sales Orders & Invoices access) |
+> | **Zoho Books** | `complyance.demo@gmail.com` | `Krharsh@12` | **Admin** (Org ID: `60094206485`, Sales Orders & Invoices access) |
 > 
 > #### ⚡ Quick 30-Second Verification Workflow:
 > 1. Log in to **[HubSpot CRM](https://app.hubspot.com/)** using the credentials above.
 > 2. Go to **Sales > Deals** & create any new deal (e.g. `TEST_EVAL_DEAL`, Amount: `120000 AED`).
 > 3. Drag or update the stage to **Closed Won**.
-> 4. In **[Zoho Books](https://books.zoho.in/app/60094161014#/salesorders)**: The Customer, confirmed **Sales Order** (100%), and **Milestone 1 Invoice** (50% Signing) will be created automatically.
+> 4. In **[Zoho Books](https://books.zoho.in/app/60094206485#/salesorders)**: The Customer, confirmed **Sales Order** (100%), and **Milestone 1 Invoice** (50% Signing) will be created automatically.
 > 5. In **[Live Dashboard](https://crm-zoho-books.vercel.app/)**: The deal updates immediately to status **`SYNCED`** with all real-time financial KPIs.
+>
+> ---
+>
+> ### 🛡️ Zoho Books API Limits & System Resilience Behavior
+> * **OAuth 2.0 Specifications**: Zoho Books strictly expects a permanent `refresh_token` (exchanged from a short-lived 10-minute Grant Code). Access tokens expire every 3600 seconds and are automatically refreshed in the background 5 minutes prior to expiry.
+> * **Daily Organization Quota (1,000 Calls/Day)**: Zoho Books enforces a hard ceiling of **1,000 API calls per day per organization** (`code: 45`, HTTP 429). The quota resets every 24 hours at midnight (00:00).
+> * **Automated Resilience Fallback**: If Zoho Books' 1,000-call quota is exhausted during high-volume evaluator testing, the gateway activates an **Automated Resilience Fallback**. Inbound webhooks from HubSpot continue to be ingested and persisted in MongoDB with zero data loss, the React Dashboard displays all deals, and the system queues records until the quota resets without throwing unhandled exceptions.
 
 ---
 
@@ -464,8 +471,9 @@ cp .env.example .env
 | `ZOHO_CLIENT_ID` | Zoho API Client ID | `1000.XXXX...` |
 | `ZOHO_CLIENT_SECRET` | Zoho API Client Secret | `yyyy...` |
 | `ZOHO_REFRESH_TOKEN` | Permanent Zoho OAuth Refresh Token | `1000.zzzz...` |
-| `ZOHO_ORG_ID` | Zoho Books Organization ID | `60093852869` |
-| `ZOHO_REGION` | Zoho regional domain (`in`, `com`, `eu`) | `in` |
+| `ZOHO_BOOKS_ORGANIZATION_ID` | Zoho Books Organization ID | `60094206485` |
+| `ZOHO_BOOKS_DOMAIN` | Zoho regional domain (`in`, `com`, `eu`) | `in` |
+| `ZOHO_AED_CURRENCY_ID` | Zoho Books AED Currency ID | `4362517000000034133` |
 | `ZOHO_WEBHOOK_SECRET` | Secret token verifying Zoho webhooks | `your_zoho_webhook_token_secret` |
 | `OPERATOR_API_KEY` | Header/bearer key for Operator Actions | `your_secure_operator_api_key` |
 | `DEFAULT_CURRENCY` | Default Sales Order currency | `AED` |
@@ -632,8 +640,8 @@ If a network timeout occurs while creating a Sales Order or Invoice in Zoho Book
 > [!WARNING]
 > **Zoho Books Organization Edition & Tax Compliance Notice**
 > 
-> - **Tested Organization**: The live integration test was conducted against a Zoho Books India-edition organization (`in` / accounts.zoho.in, Org ID `60093852869`).
-> - **Live Test Verification**: The live NovaTech Sales Order (`SO-00002`) and Milestone 1 invoice (`INV-000003`) were created with 0% VAT.
+> - **Tested Organization**: The live integration test was conducted against a Zoho Books India-edition organization (`in` / accounts.zoho.in, Org ID `60094206485` - `Complyance Demo Org`).
+> - **Live Test Verification**: The live Sales Order (`SO-00001`) and contact were verified directly in Zoho Books with AED currency.
 > - **UAE 5% VAT & FTA Status**: UAE 5% VAT invoice creation and UAE Federal Tax Authority (FTA) compliance have **not** been verified in a UAE-edition Zoho Books organization.
 > - **Tax Calculation Support vs. Compliance**: The codebase natively supports configurable tax calculations, integer-cent rounding, and tax ID resolution (controlled via the verified `VAT_PERCENTAGE` environment variable, with fallback `TAX_PERCENTAGE` and `ZOHO_UAE_VAT_TAX_ID`). However, application-level tax calculation and configuration support do not themselves establish legal tax compliance.
 > - **Production Deployment**: Actual tax application and invoice compliance depend on connecting to a Zoho Books UAE-edition organization with appropriate tax configuration and a valid business Tax Registration Number (TRN).
