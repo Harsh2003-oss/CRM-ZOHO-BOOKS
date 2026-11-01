@@ -44,9 +44,17 @@ const CustomerMappingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['ACTIVE', 'AMBIGUOUS'],
+      enum: ['ACTIVE', 'AMBIGUOUS', 'DELETED'],
       default: 'ACTIVE',
       index: true
+    },
+    deletedReason: {
+      type: String,
+      default: null
+    },
+    deletedAt: {
+      type: Date,
+      default: null
     },
     candidateMatches: [
       {

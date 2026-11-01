@@ -6,14 +6,17 @@ export default function OperatorPage({
   onResolveCustomer,
   onRetryReconciliation,
   onRetryHubSpotSync,
-  onRetryEvent
+  onRetryEvent,
+  onReconcileHubSpotDeals
 }) {
   const [selectedCandidates, setSelectedCandidates] = useState({});
+  const [reconcileDealId, setReconcileDealId] = useState('');
 
   const ambiguousCustomers = exceptionsData?.ambiguousCustomers || [];
   const reconciliationRequired = exceptionsData?.reconciliationRequired || [];
   const hubspotSyncFailed = exceptionsData?.hubspotSyncFailed || [];
   const failedWebhookEvents = exceptionsData?.failedWebhookEvents || [];
+  const requiresManualMatch = exceptionsData?.requiresManualMatch || [];
 
   return (
     <div className="space-y-6">
@@ -28,6 +31,50 @@ export default function OperatorPage({
         <span className="px-3 py-1 bg-indigo-600 text-xs font-semibold rounded-md">
           Auth Status: {operatorKey ? 'Active' : 'Unauthenticated'}
         </span>
+      </div>
+
+      {/* HubSpot Deal Reconciliation Panel */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center">
+          <div>
+            <h3 className="text-sm font-bold text-indigo-900">
+              HubSpot CRM Closed Won Reconciliation
+            </h3>
+            <p className="text-xs text-indigo-700">
+              Fetch Closed Won deals missed due to network drops or unconfigured webhooks. Idempotent & non-destructive.
+            </p>
+          </div>
+          <span className="px-2.5 py-1 bg-indigo-200 text-indigo-900 text-[10px] font-bold rounded">
+            API Reconciler
+          </span>
+        </div>
+
+        <div className="p-6">
+          <div className="flex flex-col sm:flex-row gap-3 items-center">
+            <input
+              type="text"
+              placeholder="Specific HubSpot Deal ID (optional, e.g. 360906792672)"
+              value={reconcileDealId}
+              onChange={(e) => setReconcileDealId(e.target.value)}
+              className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            />
+            <button
+              onClick={() => {
+                if (onReconcileHubSpotDeals) {
+                  onReconcileHubSpotDeals({ dealId: reconcileDealId.trim() || null });
+                  setReconcileDealId('');
+                }
+              }}
+              disabled={!operatorKey}
+              className="w-full sm:w-auto px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md disabled:opacity-40 transition shadow-sm whitespace-nowrap"
+            >
+              {reconcileDealId.trim() ? `Reconcile Deal ${reconcileDealId.trim()}` : 'Scan & Reconcile Closed Won Deals'}
+            </button>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-2">
+            💡 Leaves empty to scan all Closed Won deals in HubSpot, or specify a deal ID for targeted reconciliation. Safeguards prevent duplicate customers, sales orders, or invoices.
+          </p>
+        </div>
       </div>
 
       {/* 1. Ambiguous Customer Mappings */}

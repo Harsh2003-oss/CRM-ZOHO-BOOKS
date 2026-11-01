@@ -497,17 +497,15 @@ npm install --prefix client
 npm run build --prefix client
 ```
 
-### 3. Start Backend Integration Gateway
+### 3. Start Integration Gateway & Public Webhook Ingress
 ```bash
 npm start
 ```
-*Gateway runs on `http://localhost:5000`. Dashboard available at `http://localhost:5000/dashboard/`.*
+*Automatically boots both services together:*
+- **Core API & Dashboard UI**: `http://localhost:5000` (Dashboard available at `http://localhost:5000/dashboard/`).
+- **Public Webhook Ingress Gateway**: `http://localhost:5001` (Accepts `/api/webhooks/hubspot`, `/api/webhooks/zoho`, and `/api/health`, forwarding verified traffic to internal port 5000 while blocking operator and dashboard routes).
 
-### 4. Start Standalone Public Webhook Ingress (Optional / Secure Ingress)
-```bash
-node scripts/webhookIngressGateway.js
-```
-*Listens on port `5001`, forwarding valid webhooks to port `5000` while blocking dashboard and operator routes.*
+*(Optional: If deploying across separate physical containers, run `node scripts/webhookIngressGateway.js` standalone).*
 
 ### 5. Start Dedicated Queue Worker (Decoupled Background Execution)
 ```bash
@@ -528,7 +526,7 @@ npm run seed
 
 ## Automated Testing Suite
 
-The project includes **209 comprehensive automated tests across 15 suites** executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
+The project includes **219 comprehensive automated tests across 16 suites** executed via Node.js native test runner and `mongodb-memory-server` without touching production databases or credentials:
 
 ```bash
 npm test
@@ -547,9 +545,10 @@ npm test
 | `tests/phase3_step5_milestones.test.js` | M2 Go-Live, M3 90-Day time guard, sequential enforcement | 12 |
 | `tests/phase4_payments.test.js` | Payments, partial payments, reversals, refunds, minor units | 31 |
 | `tests/phase5_dashboard.test.js` | KPI calculation, 5 aging buckets, operator auth, Vite bundle | 16 |
+| `tests/phase5_reconciliation.test.js` | Closed Won deal reconciliation, idempotency, non-destructive sync | 10 |
 | `tests/phase6_seed.test.js` | Seed dataset verification, idempotency, production safeguard | 4 |
 | `tests/worker.test.js` | Dedicated Queue Worker, lease locking, fencing tokens, backoff | 13 |
-| **TOTAL VERIFIED TESTS** | **15 Test Suites Across 12 Test Files** | **209 Passed (0 Failed)** |
+| **TOTAL VERIFIED TESTS** | **16 Test Suites Across 13 Test Files** | **219 Passed (0 Failed)** |
 
 ---
 

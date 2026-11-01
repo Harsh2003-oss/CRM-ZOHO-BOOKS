@@ -12,8 +12,8 @@ export async function fetchSummary(currency = 'AED') {
   return data.data;
 }
 
-export async function fetchCollections({ page = 1, limit = 10, search = '', currency = 'AED' } = {}) {
-  const params = new URLSearchParams({ page, limit, search, currency });
+export async function fetchCollections({ page = 1, limit = 10, search = '', currency = 'AED', agingBasis = 'DUE_DATE' } = {}) {
+  const params = new URLSearchParams({ page, limit, search, currency, agingBasis });
   const res = await fetch(`${API_BASE}/dashboard/collections?${params.toString()}`);
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.message || 'Failed to fetch collections aging');
@@ -109,6 +109,29 @@ export async function triggerPaymentSync(crmDealId, operatorKey) {
   });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.message || data.error || 'Payment sync failed');
+  return data.data;
+}
+
+export async function fetchDeals({ page = 1, limit = 20, search = '', currency = '', syncStatus = '' } = {}) {
+  const params = new URLSearchParams({ page, limit });
+  if (search) params.append('search', search);
+  if (currency) params.append('currency', currency);
+  if (syncStatus) params.append('syncStatus', syncStatus);
+
+  const res = await fetch(`${API_BASE}/dashboard/deals?${params.toString()}`);
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.message || 'Failed to fetch deals');
+  return data.data;
+}
+
+export async function reconcileHubSpotDeals({ dealId = null, limit = 100 } = {}, operatorKey) {
+  const res = await fetch(`${API_BASE}/operator/reconcile-hubspot-deals`, {
+    method: 'POST',
+    headers: getOperatorHeaders(operatorKey),
+    body: JSON.stringify({ dealId, limit })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) throw new Error(data.message || data.error || 'HubSpot reconciliation failed');
   return data.data;
 }
 

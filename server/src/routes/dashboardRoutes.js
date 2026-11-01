@@ -10,6 +10,8 @@ const router = express.Router();
 router.get('/summary', async (req, res, next) => {
   try {
     const { currency } = req.query;
+    // Trigger non-blocking real-time sync for pending HubSpot deals
+    DashboardService.checkAndSyncPendingHubSpotDeals().catch(() => {});
     const summary = await DashboardService.getSummaryMetrics({ currency });
     res.json({
       success: true,
@@ -26,13 +28,14 @@ router.get('/summary', async (req, res, next) => {
  */
 router.get('/collections', async (req, res, next) => {
   try {
-    const { page, limit, search, currency, referenceDate } = req.query;
+    const { page, limit, search, currency, referenceDate, agingBasis } = req.query;
     const collections = await DashboardService.getCollectionsAging({
       page,
       limit,
       search,
       currency,
-      referenceDate: referenceDate ? new Date(referenceDate) : new Date()
+      referenceDate: referenceDate ? new Date(referenceDate) : new Date(),
+      agingBasis: agingBasis || 'DUE_DATE'
     });
     res.json({
       success: true,
@@ -98,6 +101,29 @@ router.get('/exceptions', async (req, res, next) => {
     res.json({
       success: true,
       data: exceptions
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/dashboard/deals
+ * Paginated CRM deals tracked in the integration system with status and search.
+ */
+router.get('/deals', async (req, res, next) => {
+  try {
+    const { page, limit, search, currency, syncStatus } = req.query;
+    const deals = await DashboardService.getDeals({
+      page,
+      limit,
+      search,
+      currency,
+      syncStatus
+    });
+    res.json({
+      success: true,
+      data: deals
     });
   } catch (err) {
     next(err);

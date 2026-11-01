@@ -6,6 +6,18 @@ const IntegrationSync = require('../models/IntegrationSync');
  * Service to handle incoming HubSpot CRM Webhooks.
  * Decouples CRM from Zoho Books: returns immediate response while durably
  * persisting events in MongoDB for background execution.
+ *
+ * Handles ALL HubSpot webhook subscription types:
+ *   deal.creation              → seed IntegrationSync stub
+ *   deal.propertyChange        → sync amount/name/stage/currency changes
+ *   deal.deletion              → void Zoho records, soft-delete DB records
+ *   deal.merge                 → redirect merged deal to surviving deal
+ *   contact.creation           → seed CustomerMapping stub
+ *   contact.propertyChange     → propagate name/email to Zoho contact
+ *   contact.deletion           → soft-delete CustomerMapping
+ *   company.creation           → seed CustomerMapping stub
+ *   company.propertyChange     → propagate company name to Zoho
+ *   company.deletion           → soft-delete CustomerMapping
  */
 class WebhookService {
   /**
@@ -17,8 +29,8 @@ class WebhookService {
     }
 
     const objectId = event.objectId || event.dealId || event.id;
-    const propName = event.propertyName || 'dealstage';
-    const propValue = event.propertyValue || event.dealstage || 'unknown';
+    const propName = event.propertyName || event.subscriptionType || 'unknown';
+    const propValue = event.propertyValue || event.dealstage || event.subscriptionType || 'unknown';
     const occurredAt = event.occurredAt || event.timestamp || '';
 
     const raw = `${objectId}_${propName}_${propValue}_${occurredAt}`;
@@ -41,6 +53,90 @@ class WebhookService {
   }
 
   /**
+   * Classifies a HubSpot webhook event into a processing category.
+   * Returns: { category, isActionable }
+   *   category:
+   *     'CLOSED_WON'        → triggers M1 orchestration
+   *     'GO_LIVE'           → triggers M2 orchestration
+   *     'M3_TRIGGER'        → triggers M3 orchestration
+   *     'DEAL_CREATION'     → seeds stub, no Zoho action
+   *     'DEAL_UPDATE'       → property change on existing deal
+   *     'DEAL_DELETION'     → delete from DB + void in Zoho
+   *     'DEAL_MERGE'        → redirect archived deal to surviving
+   *     'CONTACT_CREATION'  → seed customer stub
+   *     'CONTACT_UPDATE'    → propagate name/email change
+   *     'CONTACT_DELETION'  → soft-delete CustomerMapping
+   *     'IGNORED'           → no action needed
+   */
+  static classifyEvent(event) {
+    const subscriptionType = String(event.subscriptionType || '').toLowerCase();
+    const propName = String(event.propertyName || '').toLowerCase();
+    const propValue = String(event.propertyValue || event.dealstage || '').toLowerCase().trim();
+    // Normalized version for matching patterns with spaces/dashes (e.g. "closed won" → "closedwon")
+    const propValueNorm = propValue.replace(/[\s-]+/g, '');
+
+    // --- DEAL EVENTS ---
+    if (subscriptionType === 'deal.creation') {
+      return { category: 'DEAL_CREATION', isActionable: true };
+    }
+
+    if (subscriptionType === 'deal.deletion') {
+      return { category: 'DEAL_DELETION', isActionable: true };
+    }
+
+    if (subscriptionType === 'deal.merge') {
+      return { category: 'DEAL_MERGE', isActionable: true };
+    }
+
+    if (subscriptionType === 'deal.propertychange' || subscriptionType === 'deal.propertyChange' || !subscriptionType || subscriptionType === 'deal.property_change') {
+      // Stage → Closed Won
+      if (propName === 'dealstage' && (propValueNorm === 'closedwon' || propValue === 'closed won')) {
+        return { category: 'CLOSED_WON', isActionable: true };
+      }
+      // Go-Live date set
+      if (propName === 'confirmed_go_live_date' || propName === 'go_live_date' ||
+          (propName === 'milestone_stage' && (propValue === 'go_live_reached' || propValueNorm === 'golivereached' || propValue === 'm2_go_live' || propValueNorm === 'golife'))) {
+        return { category: 'GO_LIVE', isActionable: true };
+      }
+      // M3 trigger
+      if (propName === 'milestone_stage' && (propValue === '90_days_reached' || propValueNorm === '90daysreached' || propValue === 'm3_reached' || propValueNorm === 'm3reached' || propValue === '90_days' || propValue === 'm3' || propValue === 'm3_completed' || propValueNorm === 'm3completed')) {
+        return { category: 'M3_TRIGGER', isActionable: true };
+      }
+      // Other deal property changes worth tracking (amount, name, currency)
+      const trackedProps = ['amount', 'dealname', 'deal_currency_code', 'closedate', 'dealstage'];
+      if (trackedProps.includes(propName)) {
+        return { category: 'DEAL_UPDATE', isActionable: true };
+      }
+      // Unknown property change — still seed the deal record
+      return { category: 'DEAL_UPDATE', isActionable: true };
+    }
+
+    // --- CONTACT EVENTS ---
+    if (subscriptionType === 'contact.creation') {
+      return { category: 'CONTACT_CREATION', isActionable: true };
+    }
+    if (subscriptionType === 'contact.deletion') {
+      return { category: 'CONTACT_DELETION', isActionable: true };
+    }
+    if (subscriptionType.startsWith('contact.property')) {
+      return { category: 'CONTACT_UPDATE', isActionable: true };
+    }
+
+    // --- COMPANY EVENTS ---
+    if (subscriptionType === 'company.creation') {
+      return { category: 'CONTACT_CREATION', isActionable: true }; // same handler as contact
+    }
+    if (subscriptionType === 'company.deletion') {
+      return { category: 'CONTACT_DELETION', isActionable: true }; // same handler
+    }
+    if (subscriptionType.startsWith('company.property')) {
+      return { category: 'CONTACT_UPDATE', isActionable: true };
+    }
+
+    return { category: 'IGNORED', isActionable: false };
+  }
+
+  /**
    * Ingests and persists webhook events with deduplication.
    * @param {Array|Object} rawBody
    * @returns {Promise<{ accepted: number, ignored: number, duplicates: number }>}
@@ -54,17 +150,8 @@ class WebhookService {
     for (const event of events) {
       const eventId = this.generateEventId(event);
       const dealId = String(event.objectId || event.dealId || event.id || '');
-      const propName = event.propertyName || 'dealstage';
-      const propValue = String(event.propertyValue || event.dealstage || '').toLowerCase().trim();
 
-      // We initiate workflow for Closed Won deals (M1) or Go-Live confirmation events (M2)
-      const isClosedWon = propName === 'dealstage' && (propValue === 'closedwon' || propValue === 'closed won');
-      const isGoLiveEvent =
-        propName === 'confirmed_go_live_date' ||
-        propName === 'go_live_date' ||
-        (propName === 'milestone_stage' && (propValue === 'go_live_reached' || propValue === 'm2_go_live' || propValue === 'go-live'));
-
-      const isActionable = isClosedWon || isGoLiveEvent;
+      const { category, isActionable } = this.classifyEvent(event);
 
       // Check for duplicate in WebhookEvent
       const existing = await WebhookEvent.findOne({ eventId });
@@ -73,8 +160,8 @@ class WebhookService {
         continue;
       }
 
-      if (!isActionable) {
-        // Save as IGNORED so we maintain an audit trail without queueing work
+      if (!isActionable || category === 'IGNORED') {
+        // Save as IGNORED for audit trail
         try {
           await WebhookEvent.create({
             eventId,
@@ -89,21 +176,40 @@ class WebhookService {
           if (err.code === 11000) duplicates++;
           else throw err;
         }
+        // Still seed the deal in IntegrationSync for visibility
+        if (dealId && category !== 'CONTACT_DELETION' && category !== 'CONTACT_UPDATE' && category !== 'CONTACT_CREATION') {
+          try {
+            await IntegrationSync.findOneAndUpdate(
+              { crmDealId: dealId },
+              {
+                $setOnInsert: {
+                  crmDealId: dealId,
+                  syncStatus: 'PENDING',
+                  dealName: event.dealname || `Deal ${dealId}`
+                }
+              },
+              { upsert: true, returnDocument: 'after' }
+            );
+          } catch (syncErr) {
+            // Non-blocking
+          }
+        }
         continue;
       }
 
-      // Valid Closed Won deal: persist as RECEIVED
+      // Actionable event: persist as RECEIVED for queue processing
       try {
         await WebhookEvent.create({
           eventId,
           source: 'CRM',
-          eventType: event.subscriptionType || 'deal.propertyChange',
+          eventType: event.subscriptionType || category,
           status: 'RECEIVED',
-          payload: event
+          payload: { ...event, _category: category }
         });
 
-        // Upsert IntegrationSync record so the deal is tracked immediately
-        if (dealId) {
+        // Seed IntegrationSync stub for deal events so the deal is visible immediately
+        const isDealEvent = ['CLOSED_WON', 'GO_LIVE', 'M3_TRIGGER', 'DEAL_CREATION', 'DEAL_UPDATE', 'DEAL_DELETION', 'DEAL_MERGE'].includes(category);
+        if (dealId && isDealEvent) {
           await IntegrationSync.findOneAndUpdate(
             { crmDealId: dealId },
             {
@@ -217,3 +323,4 @@ class WebhookService {
 }
 
 module.exports = WebhookService;
+

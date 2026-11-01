@@ -13,6 +13,7 @@
  * 4. Reconstructs and forwards X-Forwarded-Host and X-Forwarded-Proto for upstream canonical URL reconstruction.
  */
 
+require('dotenv').config();
 const http = require('http');
 
 const INGRESS_PORT = parseInt(process.env.INGRESS_PORT || '5001', 10);
@@ -79,12 +80,16 @@ const server = http.createServer((req, res) => {
   );
 
   proxyReq.on('error', (err) => {
-    console.error(`[INGRESS ERROR] Failed to forward request to ${TARGET_HOST}:${TARGET_PORT}:`, err.message);
+    if (err.code === 'ECONNREFUSED') {
+      console.error(`[INGRESS ERROR] Target API server at ${TARGET_HOST}:${TARGET_PORT} is offline. Start the backend server with 'npm start' in another terminal.`);
+    } else {
+      console.error(`[INGRESS ERROR] Failed to forward request to ${TARGET_HOST}:${TARGET_PORT}:`, err.message);
+    }
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       success: false,
       error: 'BAD_GATEWAY',
-      message: 'Integration service is currently unreachable.'
+      message: `Integration backend server at ${TARGET_HOST}:${TARGET_PORT} is offline. Ensure 'npm start' is running in another terminal.`
     }));
   });
 
@@ -93,6 +98,16 @@ const server = http.createServer((req, res) => {
 });
 
 if (require.main === module) {
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`[INGRESS GATEWAY] Port ${INGRESS_PORT} is already in use (primary server is already hosting ingress gateway).`);
+      process.exit(0);
+    } else {
+      console.error(`[INGRESS GATEWAY FATAL]`, err);
+      process.exit(1);
+    }
+  });
+
   server.listen(INGRESS_PORT, '0.0.0.0', () => {
     console.log(`==================================================`);
     console.log(`🛡️  Public Webhook Ingress Gateway Active on Port ${INGRESS_PORT}`);

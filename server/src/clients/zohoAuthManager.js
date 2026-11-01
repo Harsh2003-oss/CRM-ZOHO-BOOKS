@@ -5,6 +5,7 @@ class ZohoAuthManager {
     this.accessToken = null;
     this.expiresAt = 0;
     this.refreshPromise = null;
+    this.cooldownUntil = 0;
   }
 
   async getValidAccessToken() {
@@ -16,11 +17,22 @@ class ZohoAuthManager {
       return this.accessToken;
     }
 
+    if (this.cooldownUntil && now < this.cooldownUntil) {
+      if (this.accessToken) return this.accessToken;
+      throw new Error(`Zoho OAuth in cooldown for next ${Math.ceil((this.cooldownUntil - now) / 1000)}s: Access Denied`);
+    }
+
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
 
     this.refreshPromise = this.refreshToken()
+      .catch((err) => {
+        if (err.message.includes('Access Denied') || err.message.includes('too many requests')) {
+          this.cooldownUntil = Date.now() + 60000; // 60s cooldown to protect against continuous hammering
+        }
+        throw err;
+      })
       .finally(() => {
         this.refreshPromise = null;
       });

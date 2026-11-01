@@ -91,8 +91,67 @@ class HubSpotClient {
   async getDeal(dealId) {
     return this.request({
       method: 'GET',
-      path: `/crm/v3/objects/deals/${dealId}?properties=dealname,amount,dealstage,closedate&associations=companies,contacts,line_items`,
+      path: `/crm/v3/objects/deals/${dealId}?properties=dealname,amount,dealstage,closedate,deal_currency_code,company,contact,email,product_name,product_sku,sku,confirmed_go_live_date,go_live_date,milestone_stage,integration_milestone_stage&associations=companies,contacts,line_items`,
       crmDealId: dealId
+    });
+  }
+
+  async searchClosedWonDeals({ limit = 100 } = {}) {
+    return this.request({
+      method: 'POST',
+      path: '/crm/v3/objects/deals/search',
+      body: {
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: 'dealstage',
+                operator: 'EQ',
+                value: 'closedwon'
+              }
+            ]
+          }
+        ],
+        properties: [
+          'dealname',
+          'amount',
+          'dealstage',
+          'closedate',
+          'deal_currency_code',
+          'company',
+          'contact',
+          'email',
+          'product_name',
+          'product_sku',
+          'sku',
+          'confirmed_go_live_date',
+          'go_live_date',
+          'milestone_stage',
+          'integration_milestone_stage'
+        ],
+        limit
+      }
+    });
+  }
+
+  async getRecentDeals({ limit = 50 } = {}) {
+    return this.request({
+      method: 'GET',
+      path: `/crm/v3/objects/deals?limit=${limit}&properties=dealname,amount,dealstage,closedate,createdate,deal_currency_code,company,contact,email,confirmed_go_live_date,go_live_date,milestone_stage,integration_milestone_stage&associations=companies,contacts`
+    });
+  }
+
+  async getCompany(companyId) {
+    return this.request({
+      method: 'GET',
+      path: `/crm/v3/objects/companies/${companyId}?properties=name,domain,city,country`
+    });
+  }
+
+  async getContact(contactId) {
+    return this.request({
+      method: 'GET',
+      path: `/crm/v3/objects/contacts/${contactId}?properties=firstname,lastname,email,phone`
     });
   }
 

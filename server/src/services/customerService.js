@@ -41,25 +41,51 @@ class CustomerService {
       };
     }
 
-    // RULE 2: Check local CustomerMapping cache
-    const query = hubspotCompanyId
-      ? { hubspotCompanyId }
-      : { hubspotContactId };
-
-    const existingMapping = await CustomerMapping.findOne(query);
+    // RULE 2: Check local CustomerMapping cache (by Company ID, Contact ID, or Email)
+    let existingMapping = null;
+    if (hubspotCompanyId) {
+      existingMapping = await CustomerMapping.findOne({ hubspotCompanyId });
+    }
+    if (!existingMapping && hubspotContactId) {
+      existingMapping = await CustomerMapping.findOne({ hubspotContactId });
+    }
+    if (!existingMapping && contactEmail && contactEmail.trim()) {
+      existingMapping = await CustomerMapping.findOne({ contactEmail: contactEmail.trim().toLowerCase() });
+    }
 
     if (existingMapping) {
       if (existingMapping.status === 'ACTIVE' && existingMapping.zohoContactId) {
-        return {
-          status: 'RESOLVED',
-          zohoContactId: existingMapping.zohoContactId,
-          zohoContactName: existingMapping.zohoContactName,
-          mappingType: existingMapping.mappingType,
-          fromCache: true
-        };
+        // Active-Org Validation: Ensure the cached contact is accessible in the current active Zoho organization
+        let isContactAccessible = false;
+        try {
+          const verifyRes = await client.request({
+            method: 'GET',
+            path: `/contacts/${existingMapping.zohoContactId}`,
+            crmDealId
+          });
+          if (verifyRes.statusCode === 200 && verifyRes.data?.contact) {
+            isContactAccessible = true;
+          }
+        } catch (vErr) {
+          isContactAccessible = false;
+        }
+
+        if (isContactAccessible) {
+          return {
+            status: 'RESOLVED',
+            zohoContactId: existingMapping.zohoContactId,
+            zohoContactName: existingMapping.zohoContactName,
+            mappingType: existingMapping.mappingType,
+            fromCache: true
+          };
+        } else {
+          console.warn(`[CUSTOMER SERVICE] Cached contact ${existingMapping.zohoContactId} is not accessible in current Zoho organization. Invalidating stale cache and re-creating.`);
+          await CustomerMapping.deleteOne({ _id: existingMapping._id });
+          existingMapping = null;
+        }
       }
 
-      if (existingMapping.status === 'AMBIGUOUS') {
+      if (existingMapping && existingMapping.status === 'AMBIGUOUS') {
         return {
           status: 'REQUIRES_MANUAL_MATCH',
           reason: existingMapping.reason || 'Existing customer mapping is marked ambiguous and requires manual resolution.',
@@ -209,6 +235,47 @@ class CustomerService {
 
     if (!createRes.data || createRes.data.code !== 0 || !createRes.data.contact) {
       const errMsg = createRes.data?.message || 'Failed to create contact in Zoho Books';
+      if (String(errMsg).toLowerCase().includes('already exists')) {
+        try {
+          const findRes = await client.request({
+            method: 'GET',
+            path: `/contacts?contact_name=${encodeURIComponent(displayName)}`,
+            crmDealId
+          });
+          const existingContacts = findRes.data?.contacts || [];
+          if (existingContacts.length > 0) {
+            const foundContact = existingContacts[0];
+            await CustomerMapping.findOneAndUpdate(
+              query,
+              {
+                $set: {
+                  hubspotCompanyId: hubspotCompanyId || null,
+                  hubspotContactId: hubspotContactId || null,
+                  companyName: companyName || foundContact.company_name || displayName,
+                  contactName: contactName || foundContact.contact_name || displayName,
+                  contactEmail: contactEmail ? contactEmail.toLowerCase() : foundContact.email || null,
+                  zohoContactId: foundContact.contact_id,
+                  zohoContactName: foundContact.contact_name,
+                  mappingType: 'AUTOMATIC_EXACT',
+                  status: 'ACTIVE',
+                  reason: null,
+                  candidateMatches: []
+                }
+              },
+              { upsert: true, returnDocument: 'after' }
+            );
+            return {
+              status: 'RESOLVED',
+              zohoContactId: foundContact.contact_id,
+              zohoContactName: foundContact.contact_name,
+              mappingType: 'AUTOMATIC_EXACT',
+              fromCache: false
+            };
+          }
+        } catch (findErr) {
+          console.warn('[CUSTOMER SERVICE] Could not search contact by name after duplicate error:', findErr.message);
+        }
+      }
       return {
         status: 'ERROR',
         reason: errMsg
@@ -217,8 +284,19 @@ class CustomerService {
 
     const createdContact = createRes.data.contact;
 
+    const upsertQuery = {};
+    if (hubspotCompanyId && hubspotContactId) {
+      upsertQuery.$or = [{ hubspotCompanyId }, { hubspotContactId }];
+    } else if (hubspotCompanyId) {
+      upsertQuery.hubspotCompanyId = hubspotCompanyId;
+    } else if (hubspotContactId) {
+      upsertQuery.hubspotContactId = hubspotContactId;
+    } else {
+      upsertQuery.companyName = companyName || displayName;
+    }
+
     await CustomerMapping.findOneAndUpdate(
-      query,
+      upsertQuery,
       {
         $set: {
           hubspotCompanyId: hubspotCompanyId || null,

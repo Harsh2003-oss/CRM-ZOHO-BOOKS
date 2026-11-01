@@ -90,6 +90,14 @@ const MilestoneInvoiceSchema = new mongoose.Schema(
     paidAt: {
       type: Date,
       default: null
+    },
+    voidedReason: {
+      type: String,
+      default: null
+    },
+    voidedAt: {
+      type: Date,
+      default: null
     }
   },
   {

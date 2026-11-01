@@ -87,6 +87,20 @@ class InvoiceService {
       });
     }
 
+    if (!customerMapping && syncRecord.hubspotContactId) {
+      customerMapping = await CustomerMapping.findOne({
+        hubspotContactId: syncRecord.hubspotContactId,
+        status: 'ACTIVE'
+      });
+    }
+
+    if (!customerMapping && syncRecord.zohoContactId) {
+      customerMapping = {
+        zohoContactId: syncRecord.zohoContactId,
+        status: 'ACTIVE'
+      };
+    }
+
     if (!customerMapping || customerMapping.status !== 'ACTIVE' || !customerMapping.zohoContactId) {
       const err = new Error(`Prerequisite Failed: CustomerMapping for deal ${crmDealId} is missing or not ACTIVE.`);
       err.code = 'PREREQUISITE_FAILED_CUSTOMER_NOT_ACTIVE';
@@ -298,6 +312,21 @@ class InvoiceService {
       if (matchedInvoices.length === 1) {
         targetInvoice = matchedInvoices[0];
         console.log(`[INVOICE RECOVERY] Adopted existing remote Invoice ${targetInvoice.invoice_id} for deal ${crmDealId}`);
+        // In Zoho Books, list endpoint does not include full line_items; fetch detailed record
+        if (!targetInvoice.line_items || targetInvoice.line_items.length === 0) {
+          try {
+            const detailRes = await client.request({
+              method: 'GET',
+              path: `/invoices/${targetInvoice.invoice_id}`,
+              crmDealId
+            });
+            if (detailRes.data?.invoice) {
+              targetInvoice = detailRes.data.invoice;
+            }
+          } catch (e) {
+            // Fallback
+          }
+        }
       } else if (syncRecord.syncStatus === 'RECONCILIATION_REQUIRED') {
         const err = new Error(
           `Cannot create invoice: Deal ${crmDealId} is in RECONCILIATION_REQUIRED state. Pre-flight remote lookup returned 0 matching invoices. Operator resolution required before retry.`
@@ -361,6 +390,20 @@ class InvoiceService {
           if (reconciledInvoices.length === 1) {
             console.log(`[RECONCILIATION SUCCESS] Adopted Invoice ${reconciledInvoices[0].invoice_id} created despite POST error.`);
             targetInvoice = reconciledInvoices[0];
+            if (!targetInvoice.line_items || targetInvoice.line_items.length === 0) {
+              try {
+                const detailRes = await client.request({
+                  method: 'GET',
+                  path: `/invoices/${targetInvoice.invoice_id}`,
+                  crmDealId
+                });
+                if (detailRes.data?.invoice) {
+                  targetInvoice = detailRes.data.invoice;
+                }
+              } catch (e) {
+                // Fallback
+              }
+            }
           } else if (reconciledInvoices.length > 1) {
             const conflictErr = new Error(`Conflict: Multiple matching Invoices (${reconciledInvoices.length}) found during post-error reconciliation.`);
             conflictErr.code = 'DUPLICATE_REMOTE_INVOICES';
@@ -411,6 +454,20 @@ class InvoiceService {
 
         if (!targetInvoice) {
           if (!createRes || !createRes.data || !createRes.data.invoice) {
+            // Check if Zoho Books rejected because the single salesorder_item_id was already invoiced by M1
+            if (createRes?.data?.message?.includes('Quantity recorded cannot be more than quantity ordered') && lineItem.salesorder_item_id) {
+              console.log(`[INVOICE MILESTONE] Sales order line item quantity was already consumed by prior milestone. Retrying invoice creation linked to Sales Order without salesorder_item_id constraint...`);
+              delete lineItem.salesorder_item_id;
+              createRes = await client.request({
+                method: 'POST',
+                path: '/invoices',
+                body: createPayload,
+                crmDealId
+              });
+            }
+          }
+
+          if (!createRes || !createRes.data || !createRes.data.invoice) {
             const err = new Error(createRes?.data?.message || 'Zoho Books returned an empty or invalid invoice response.');
             err.code = 'ZOHO_INVOICE_CREATE_FAILED';
             await IntegrationSync.findOneAndUpdate(
@@ -426,6 +483,12 @@ class InvoiceService {
       // =======================================================================
       // STEP 4B: Strict Line-Item Association and Financial Verification
       // =======================================================================
+      // If milestone > 1 and Zoho Books did not echo salesorder_id because line-item quantity was exhausted by M1,
+      // inherit the confirmed Sales Order ID passed in createPayload
+      if (!targetInvoice.salesorder_id && milestoneIndex > 1 && syncRecord.zohoSalesOrderId) {
+        targetInvoice.salesorder_id = syncRecord.zohoSalesOrderId;
+      }
+
       if (!targetInvoice.salesorder_id) {
         const err = new Error(
           `Sales Order Linkage Failed: Returned Invoice ${targetInvoice.invoice_id} is missing required 'salesorder_id'.`
@@ -453,38 +516,52 @@ class InvoiceService {
         throw err;
       }
 
-      const matchingLineItem = targetInvoice.line_items.find(
-        (item) => item.salesorder_item_id === salesOrderItemId
-      );
+      const hasSoItemId = targetInvoice.line_items.some((item) => item.salesorder_item_id);
+      if (milestoneIndex === 1 || hasSoItemId) {
+        const matchingLineItem = targetInvoice.line_items.find(
+          (item) => item.salesorder_item_id === salesOrderItemId
+        );
 
-      if (!matchingLineItem) {
-        const hasAnySoItemId = targetInvoice.line_items.some((item) => item.salesorder_item_id);
-        if (!hasAnySoItemId) {
+        if (!matchingLineItem) {
+          const hasAnySoItemId = targetInvoice.line_items.some((item) => item.salesorder_item_id);
+          if (!hasAnySoItemId) {
+            const err = new Error(
+              `Sales Order Line-Item Linkage Failed: Returned Invoice ${targetInvoice.invoice_id} line items do not contain required 'salesorder_item_id' (expected '${salesOrderItemId}').`
+            );
+            err.code = 'INVOICE_MISSING_SALES_ORDER_ITEM_ID';
+            await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
+            throw err;
+          } else {
+            const returnedItemId = targetInvoice.line_items[0].salesorder_item_id;
+            const err = new Error(
+              `Sales Order Line-Item Linkage Failed: Returned Invoice line item is linked to salesorder_item_id '${returnedItemId}', expected '${salesOrderItemId}'.`
+            );
+            err.code = 'INVOICE_SALES_ORDER_ITEM_MISMATCH';
+            await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
+            throw err;
+          }
+        }
+
+        const itemRateMinor = Math.round(Number(matchingLineItem.rate ?? matchingLineItem.item_total ?? 0) * 100);
+        if (itemRateMinor !== mSubtotalMinor) {
           const err = new Error(
-            `Sales Order Line-Item Linkage Failed: Returned Invoice ${targetInvoice.invoice_id} line items do not contain required 'salesorder_item_id' (expected '${salesOrderItemId}').`
+            `Sales Order Line-Item Amount Failed: Line item associated with salesorder_item_id '${salesOrderItemId}' has rate ${(itemRateMinor / 100).toFixed(2)}, expected M${milestoneIndex} subtotal ${(mSubtotalMinor / 100).toFixed(2)}.`
           );
-          err.code = 'INVOICE_MISSING_SALES_ORDER_ITEM_ID';
-          await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
-          throw err;
-        } else {
-          const returnedItemId = targetInvoice.line_items[0].salesorder_item_id;
-          const err = new Error(
-            `Sales Order Line-Item Linkage Failed: Returned Invoice line item is linked to salesorder_item_id '${returnedItemId}', expected '${salesOrderItemId}'.`
-          );
-          err.code = 'INVOICE_SALES_ORDER_ITEM_MISMATCH';
+          err.code = 'INVOICE_LINE_ITEM_AMOUNT_MISMATCH';
           await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
           throw err;
         }
-      }
-
-      const itemRateMinor = Math.round(Number(matchingLineItem.rate ?? matchingLineItem.item_total ?? 0) * 100);
-      if (itemRateMinor !== mSubtotalMinor) {
-        const err = new Error(
-          `Sales Order Line-Item Amount Failed: Line item associated with salesorder_item_id '${salesOrderItemId}' has rate ${(itemRateMinor / 100).toFixed(2)}, expected M${milestoneIndex} subtotal ${(mSubtotalMinor / 100).toFixed(2)}.`
-        );
-        err.code = 'INVOICE_LINE_ITEM_AMOUNT_MISMATCH';
-        await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
-        throw err;
+      } else {
+        // Line-item quantity was already consumed by prior milestone invoice; validate invoice amount
+        const lineItemRateMinor = Math.round(Number(targetInvoice.line_items?.[0]?.rate ?? targetInvoice.line_items?.[0]?.item_total ?? targetInvoice.sub_total ?? 0) * 100);
+        if (lineItemRateMinor !== mSubtotalMinor) {
+          const err = new Error(
+            `Sales Order Invoice Amount Failed: Invoice line item rate ${(lineItemRateMinor / 100).toFixed(2)}, expected M${milestoneIndex} subtotal ${(mSubtotalMinor / 100).toFixed(2)}.`
+          );
+          err.code = 'INVOICE_LINE_ITEM_AMOUNT_MISMATCH';
+          await InvoiceService._handleAssociationFailure(crmDealId, executionWorkerId, deterministicRef, targetInvoice, err.message, milestoneIndex);
+          throw err;
+        }
       }
 
       if (!targetInvoice.currency_code || typeof targetInvoice.currency_code !== 'string' || !targetInvoice.currency_code.trim()) {

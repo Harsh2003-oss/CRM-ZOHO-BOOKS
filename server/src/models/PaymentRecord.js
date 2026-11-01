@@ -134,6 +134,19 @@ const PaymentRecordSchema = new mongoose.Schema(
     rawPayload: {
       type: mongoose.Schema.Types.Mixed,
       default: {}
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    deletedReason: {
+      type: String,
+      default: null
+    },
+    deletedAt: {
+      type: Date,
+      default: null
     }
   },
   {

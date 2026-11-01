@@ -14,6 +14,7 @@
 
 require('dotenv').config();
 const mongoose = require('mongoose');
+const { connectDB, disconnectDB } = require('../server/src/config/db');
 const CustomerMapping = require('../server/src/models/CustomerMapping');
 const IntegrationSync = require('../server/src/models/IntegrationSync');
 const MilestoneInvoice = require('../server/src/models/MilestoneInvoice');
@@ -245,8 +246,8 @@ async function seed(options = {}) {
     throw new Error(errorMsg);
   }
 
-  console.log(`[SEED] Connecting to MongoDB: ${MONGODB_URI}`);
-  await mongoose.connect(MONGODB_URI);
+  console.log(`[SEED] Connecting to MongoDB...`);
+  await connectDB();
   console.log('[SEED] Connected successfully.');
 
   // 1. Upsert Customers
@@ -872,7 +873,7 @@ async function seed(options = {}) {
   console.log(` Payments in DB:   ${paymentCount}`);
   console.log('==========================================\n');
 
-  await mongoose.disconnect();
+  await disconnectDB();
   console.log('[SEED] Disconnected from MongoDB.');
 }
 

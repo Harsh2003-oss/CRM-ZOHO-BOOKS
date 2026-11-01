@@ -17,7 +17,8 @@ import {
   retryHubSpotSync,
   resolveCustomerMapping,
   retryReconciliation,
-  triggerPaymentSync
+  triggerPaymentSync,
+  reconcileHubSpotDeals
 } from './services/api';
 
 export default function App() {
@@ -26,8 +27,8 @@ export default function App() {
     localStorage.getItem('OPERATOR_KEY') || ''
   );
   const [showKeyModal, setShowKeyModal] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [refreshInterval] = useState(15000); // 15s
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval] = useState(10000); // 10s auto-refresh
   const [toast, setToast] = useState(null);
 
   // Confirmation Modal State
@@ -51,6 +52,7 @@ export default function App() {
   // Filter States
   const [collectionsSearch, setCollectionsSearch] = useState('');
   const [collectionsPage, setCollectionsPage] = useState(1);
+  const [agingBasis, setAgingBasis] = useState('DUE_DATE');
   const [logsPage, setLogsPage] = useState(1);
   const [logsFilter, setLogsFilter] = useState({ system: '', isSuccess: '', search: '' });
 
@@ -70,7 +72,7 @@ export default function App() {
     try {
       const [sum, coll, logs, events, exceptions] = await Promise.all([
         fetchSummary(),
-        fetchCollections({ page: collectionsPage, limit: 10, search: collectionsSearch }),
+        fetchCollections({ page: collectionsPage, limit: 10, search: collectionsSearch, agingBasis }),
         fetchLogs({ page: logsPage, limit: 15, ...logsFilter }),
         fetchEvents({ limit: 15 }),
         fetchExceptions()
@@ -86,7 +88,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [collectionsPage, collectionsSearch, logsPage, logsFilter]);
+  }, [collectionsPage, collectionsSearch, agingBasis, logsPage, logsFilter]);
 
   useEffect(() => {
     fetchAllData();
@@ -124,6 +126,8 @@ export default function App() {
         );
       } else if (actionType === 'SYNC_PAYMENTS') {
         await triggerPaymentSync(payload.crmDealId, operatorKey);
+      } else if (actionType === 'RECONCILE_HUBSPOT') {
+        await reconcileHubSpotDeals({ dealId: payload.dealId, limit: payload.limit }, operatorKey);
       }
 
       showToast('Operator action executed successfully!');
@@ -167,6 +171,8 @@ export default function App() {
               setCollectionsSearch(val);
               setCollectionsPage(1);
             }}
+            agingBasis={agingBasis}
+            onAgingBasisChange={setAgingBasis}
             page={collectionsPage}
             onPageChange={setCollectionsPage}
             onTriggerSyncPayments={(dealId) =>
@@ -232,6 +238,18 @@ export default function App() {
                 message: `Re-queue event ${eventId} for immediate worker processing?`,
                 actionType: 'RETRY_EVENT',
                 payload: { eventId },
+                isExecuting: false
+              })
+            }
+            onReconcileHubSpotDeals={({ dealId, limit }) =>
+              setConfirmModal({
+                isOpen: true,
+                title: 'Reconcile HubSpot Deals',
+                message: dealId
+                  ? `Fetch and reconcile HubSpot deal ${dealId} into integration ledger?`
+                  : 'Scan HubSpot CRM for all Closed Won deals and reconcile missing records?',
+                actionType: 'RECONCILE_HUBSPOT',
+                payload: { dealId, limit },
                 isExecuting: false
               })
             }

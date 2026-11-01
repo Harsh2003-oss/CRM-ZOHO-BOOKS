@@ -174,6 +174,100 @@ export default function OverviewPage({ summary }) {
           </div>
         </div>
       </div>
+
+      {/* Tracked CRM Deals Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              Tracked CRM Deals ({summary?.deals?.length || 0})
+            </h3>
+            <p className="text-xs text-slate-500">
+              Deals synchronized or reconciled from HubSpot CRM into the integration ledger.
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-2.5 py-1 bg-slate-200 text-slate-800 rounded-md">
+            {summary?.activeCurrency || 'AED'} Ledger
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          {(!summary?.deals || summary.deals.length === 0) ? (
+            <div className="p-8 text-center text-xs text-slate-500">
+              No CRM deals tracked yet. Use the Operator tab to reconcile Closed Won deals from HubSpot.
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs text-slate-600">
+              <thead className="bg-slate-100 text-slate-700 uppercase font-semibold text-[11px] border-b border-slate-200">
+                <tr>
+                  <th className="px-5 py-3">Deal / CRM ID</th>
+                  <th className="px-5 py-3">Customer</th>
+                  <th className="px-5 py-3">Contract Value</th>
+                  <th className="px-5 py-3">Invoiced / Not Invoiced</th>
+                  <th className="px-5 py-3">Sync Status</th>
+                  <th className="px-5 py-3">Sales Order</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {summary.deals.map((deal) => {
+                  const statusColors = {
+                    PENDING: 'bg-amber-100 text-amber-800',
+                    REQUIRES_MANUAL_MATCH: 'bg-rose-100 text-rose-800',
+                    SALES_ORDER_DRAFT: 'bg-blue-100 text-blue-800',
+                    SALES_ORDER_CONFIRMED: 'bg-indigo-100 text-indigo-800',
+                    M1_INVOICED: 'bg-emerald-100 text-emerald-800',
+                    M2_INVOICED: 'bg-emerald-100 text-emerald-800',
+                    M3_INVOICED: 'bg-emerald-100 text-emerald-800',
+                    SYNCED: 'bg-emerald-100 text-emerald-800',
+                    FAILED: 'bg-rose-100 text-rose-800'
+                  };
+                  const badgeClass = statusColors[deal.syncStatus] || 'bg-slate-100 text-slate-800';
+
+                  return (
+                    <tr key={deal.crmDealId} className="hover:bg-slate-50 transition">
+                      <td className="px-5 py-3.5">
+                        <p className="font-bold text-slate-900">{deal.dealName || 'Unnamed Deal'}</p>
+                        <p className="text-[11px] text-slate-400 font-mono">ID: {deal.crmDealId}</p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <p className="font-semibold text-slate-800">{deal.customerName || '—'}</p>
+                      </td>
+                      <td className="px-5 py-3.5 font-bold text-slate-900">
+                        {formatCurrency(deal.contractValue, deal.currencyCode || currency)}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <p className="text-emerald-600 font-medium">Invoiced: {formatCurrency(deal.totalInvoicedAmount, deal.currencyCode || currency)}</p>
+                        <p className="text-slate-400 text-[11px]">Uninvoiced: {formatCurrency(deal.amountNotInvoiced, deal.currencyCode || currency)}</p>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${badgeClass}`}>
+                          {deal.syncStatus}
+                        </span>
+                        {deal.failureReason && (
+                          <p className="text-[10px] text-rose-600 mt-1 max-w-xs truncate" title={deal.failureReason}>
+                            {deal.failureReason}
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {deal.salesOrderStatus === 'CONFIRMED' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            {deal.zohoSalesOrderNumber || 'CONFIRMED'}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">
+                            {deal.salesOrderStatus || 'NONE'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

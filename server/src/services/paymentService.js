@@ -911,6 +911,7 @@ class PaymentService {
             $set: {
               balance: currentBalance,
               status: newStatus,
+              dueDate: invData.due_date ? new Date(invData.due_date) : m.dueDate,
               paidAt: currentBalance === 0 ? m.paidAt || new Date() : null
             }
           }

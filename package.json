@@ -5,6 +5,9 @@
   "main": "server/src/server.js",
   "scripts": {
     "start": "node server/src/server.js",
+    "ingress": "node scripts/webhookIngressGateway.js",
+    "gateway": "node scripts/webhookIngressGateway.js",
+    "start:all": "concurrently -k -p \"[{name}]\" -n \"SERVER,INGRESS\" -c \"blue,green\" \"npm start\" \"npm run ingress\"",
     "build": "npm run build --prefix client",
     "dev": "concurrently -k -p \"[{name}]\" -n \"SERVER,CLIENT\" -c \"blue,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node server/src/server.js",

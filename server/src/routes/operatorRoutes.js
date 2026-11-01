@@ -105,6 +105,27 @@ router.post('/retry-reconciliation/:crmDealId', async (req, res, next) => {
 });
 
 /**
+ * POST /api/operator/trigger-m3/:crmDealId
+ * Triggers Milestone 3 (20% 90-Day Post Go-Live) invoice creation.
+ */
+router.post('/trigger-m3/:crmDealId', async (req, res, next) => {
+  try {
+    const { crmDealId } = req.params;
+    const { OrchestrationService } = require('../services/orchestrationService');
+    const result = await OrchestrationService.process90DayMilestone({
+      crmDealId,
+      isManualTrigger: true
+    });
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/operator/sync-payments/:crmDealId
  * Triggers on-demand reverse payment sync for a deal by polling Zoho Books.
  */
@@ -120,6 +141,31 @@ router.post('/sync-payments/:crmDealId', async (req, res, next) => {
       data: result
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/operator/reconcile-hubspot-deals
+ * Reconciles Closed Won deals from HubSpot CRM into the local integration database.
+ * Supports reconciling a specific dealId or scanning all Closed Won deals.
+ */
+router.post('/reconcile-hubspot-deals', async (req, res, next) => {
+  try {
+    const { dealId, limit } = req.body || {};
+    const result = await DashboardService.reconcileHubSpotDeals({
+      dealId: dealId || req.query.dealId,
+      limit: limit ? parseInt(limit, 10) : 100,
+      operator: req.operator
+    });
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (err) {
+    if (err.code === 'HUBSPOT_FETCH_FAILED') {
+      return res.status(404).json({ success: false, error: err.code, message: err.message });
+    }
     next(err);
   }
 });
