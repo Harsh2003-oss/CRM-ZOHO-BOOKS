@@ -4,6 +4,26 @@ An enterprise-grade, bi-directional integration gateway connecting **HubSpot CRM
 
 Includes an operational monitoring dashboard built with **React 18 + Vite + Tailwind CSS** featuring collections aging, real-time audit logging, an operator exception resolution center, and a dedicated public webhook ingress gateway.
 
+> [!IMPORTANT]
+> ### 🎯 Live Evaluation & Interviewer Testing Access
+> For live evaluation of the end-to-end integration across **HubSpot CRM**, **Zoho Books**, and the **Live Dashboard**, full **Admin** access has been provisioned:
+> 
+> - **Live Dashboard (Frontend)**: [https://crm-zoho-books.vercel.app/](https://crm-zoho-books.vercel.app/)
+> - **Production API Gateway (Backend)**: [https://crm-zoho-books.onrender.com](https://crm-zoho-books.onrender.com) (Health: [`/api/health`](https://crm-zoho-books.onrender.com/api/health))
+> - **HubSpot CRM Portal**: [https://app.hubspot.com/](https://app.hubspot.com/) (Portal ID: `247839416`)
+> - **Zoho Books Portal**: [https://books.zoho.in/](https://books.zoho.in/) (Org ID: `60094161014`, Organization: `xyz`, Region: `India (.in)`)
+> 
+> | Role | Email | Password | Permissions |
+> | :--- | :--- | :--- | :--- |
+> | **Admin** | `complyance.demo@gmail.com` | `Krharsh@12` | **Full Admin Rights** (Create deals, move to Closed Won, inspect confirmed Sales Orders & Invoices) |
+> 
+> #### ⚡ Quick 30-Second Verification Workflow:
+> 1. Log in to **[HubSpot CRM](https://app.hubspot.com/)** using the credentials above.
+> 2. Go to **Sales > Deals** & create any new deal (e.g. `TEST_EVAL_DEAL`, Amount: `120000 AED`).
+> 3. Drag or update the stage to **Closed Won**.
+> 4. In **[Zoho Books](https://books.zoho.in/app/60094161014#/salesorders)**: The Customer, confirmed **Sales Order** (100%), and **Milestone 1 Invoice** (50% Signing) will be created automatically.
+> 5. In **[Live Dashboard](https://crm-zoho-books.vercel.app/)**: The deal updates immediately to status **`SYNCED`** with all real-time financial KPIs.
+
 ---
 
 ## Table of Contents
@@ -158,7 +178,7 @@ flowchart TB
     INV_SVC <-->|REST API| ZB
     PAY_SVC <-->|REST API| ZB
     
-    ORCH <-->|REST API (Push Properties)| HS
+    ORCH <-->|REST API - Push Properties| HS
     ORCH <--> DB
     DASH_SVC <--> DB
     QUEUE <--> DB
