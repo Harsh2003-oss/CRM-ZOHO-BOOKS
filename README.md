@@ -15,9 +15,10 @@ Includes an operational monitoring dashboard built with **React 18 + Vite + Tail
 > - **HubSpot CRM Portal**: [https://app.hubspot.com/](https://app.hubspot.com/) (Portal ID: `247839416`)
 > - **Zoho Books Portal**: [https://books.zoho.in/](https://books.zoho.in/) (Org ID: `60094161014`, Organization: `xyz`, Region: `India (.in)`)
 > 
-> | Role | Email | Password | Permissions |
+> | Platform | Email | Password | Role / Access |
 > | :--- | :--- | :--- | :--- |
-> | **Admin** | `complyance.demo@gmail.com` | `Krharsh@12` | **Full Admin Rights** (Create deals, move to Closed Won, inspect confirmed Sales Orders & Invoices) |
+> | **HubSpot CRM** | `complyance.demo@gmail.com` | `Krharsh@123456` | **Super Admin** (Full CRM access to create deals & manage pipeline) |
+> | **Zoho Books** | `complyance.demo@gmail.com` | `Krharsh@12` | **Admin** (Org ID: `60094161014`, Sales Orders & Invoices access) |
 > 
 > #### ⚡ Quick 30-Second Verification Workflow:
 > 1. Log in to **[HubSpot CRM](https://app.hubspot.com/)** using the credentials above.
