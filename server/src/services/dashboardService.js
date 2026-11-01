@@ -153,19 +153,22 @@ class DashboardService {
         // Non-blocking
       }
 
-      // Check and sync invoice payment balances
-      try {
-        const PaymentService = require('./paymentService');
-        if (typeof PaymentService.syncAllActiveDeals === 'function') {
-          await PaymentService.syncAllActiveDeals({ limit: 10 });
+      // Throttle payment polling to once every 15 minutes to strictly preserve Zoho API quota
+      const nowMs = Date.now();
+      if (!this._lastPaymentSyncTime || (nowMs - this._lastPaymentSyncTime >= 15 * 60 * 1000)) {
+        this._lastPaymentSyncTime = nowMs;
+        try {
+          const PaymentService = require('./paymentService');
+          if (typeof PaymentService.syncAllActiveDeals === 'function') {
+            await PaymentService.syncAllActiveDeals({ limit: 10 });
+          }
+        } catch (payErr) {
+          // Non-blocking
         }
-      } catch (payErr) {
-        // Non-blocking
       }
 
-      // Throttle blanket Zoho entity sync to once every 10 minutes to strictly preserve organization rate limit
-      const nowMs = Date.now();
-      if (!this._lastZohoSyncTime || (nowMs - this._lastZohoSyncTime >= 10 * 60 * 1000)) {
+      // Throttle blanket Zoho entity sync to once every 15 minutes to strictly preserve organization rate limit
+      if (!this._lastZohoSyncTime || (nowMs - this._lastZohoSyncTime >= 15 * 60 * 1000)) {
         this._lastZohoSyncTime = nowMs;
         try {
           await this.syncZohoBooksContacts();

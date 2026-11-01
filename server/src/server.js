@@ -9,7 +9,7 @@ const PORT = parseInt(process.env.PORT || '5000', 10);
 const INGRESS_PORT = parseInt(process.env.INGRESS_PORT || '5001', 10);
 const ENABLE_INGRESS = process.env.ENABLE_INGRESS_GATEWAY !== 'false' && process.env.WEBHOOK_INGRESS_ONLY !== 'true';
 const AUTO_SYNC_ENABLED = process.env.ENABLE_AUTO_CRM_SYNC !== 'false';
-const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_POLL_INTERVAL_MS || '5000', 10);
+const SYNC_INTERVAL_MS = parseInt(process.env.SYNC_POLL_INTERVAL_MS || '15000', 10);
 
 async function startServer() {
   validateEnv();
