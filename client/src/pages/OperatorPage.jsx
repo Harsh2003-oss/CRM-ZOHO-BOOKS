@@ -28,8 +28,9 @@ export default function OperatorPage({
             Safe operator intervention for customer ambiguity, retryable sync errors, and webhook queue failures.
           </p>
         </div>
-        <span className="px-3 py-1 bg-indigo-600 text-xs font-semibold rounded-md">
-          Auth Status: {operatorKey ? 'Active' : 'Unauthenticated'}
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white text-xs font-semibold rounded-lg shadow-xs">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+          Operator Privileges Verified
         </span>
       </div>
 

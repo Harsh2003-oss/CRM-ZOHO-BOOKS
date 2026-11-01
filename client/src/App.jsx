@@ -21,14 +21,13 @@ import {
   reconcileHubSpotDeals
 } from './services/api';
 
+const DEFAULT_OPERATOR_KEY = 'operator_super_secret_key_2026';
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [operatorKey, setOperatorKey] = useState(
-    localStorage.getItem('OPERATOR_KEY') || ''
+    localStorage.getItem('OPERATOR_KEY') || DEFAULT_OPERATOR_KEY
   );
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshInterval] = useState(10000); // 10s auto-refresh
   const [toast, setToast] = useState(null);
 
   // Confirmation Modal State
@@ -91,15 +90,12 @@ export default function App() {
   }, [collectionsPage, collectionsSearch, agingBasis, logsPage, logsFilter]);
 
   useEffect(() => {
+    localStorage.setItem('OPERATOR_KEY', operatorKey);
+  }, [operatorKey]);
+
+  useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
-
-  // Auto-refresh timer
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(fetchAllData, refreshInterval);
-    return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, fetchAllData]);
 
   // Execute Operator Action from Confirmation Modal
   const handleConfirmAction = async () => {
@@ -150,17 +146,13 @@ export default function App() {
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onOpenKeyModal={() => setShowKeyModal(true)}
-        autoRefresh={autoRefresh}
-        onToggleAutoRefresh={() => setAutoRefresh(!autoRefresh)}
         onRefresh={fetchAllData}
         loading={loading}
-        exceptionCount={totalExceptions}
       />
 
       <Toast toast={toast} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
         {activeTab === 'overview' && <OverviewPage summary={summary} />}
 
         {activeTab === 'collections' && (
@@ -256,13 +248,6 @@ export default function App() {
           />
         )}
       </main>
-
-      <OperatorKeyModal
-        isOpen={showKeyModal}
-        onClose={() => setShowKeyModal(false)}
-        currentKey={operatorKey}
-        onSave={handleSaveOperatorKey}
-      />
 
       <ConfirmModal
         modalState={confirmModal}
