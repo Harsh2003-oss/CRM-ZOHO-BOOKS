@@ -3,7 +3,7 @@
   "type": "webhooks",
   "config": {
     "settings": {
-      "targetUrl": "https://compromise-bits-personalized-outdoors.trycloudflare.com/api/webhooks/hubspot",
+      "targetUrl": "https://crm-zoho-books.onrender.com/api/webhooks/hubspot",
       "maxConcurrentRequests": 10
     },
     "subscriptions": {
