@@ -17,7 +17,8 @@ Includes an operational monitoring dashboard built with **React 18 + Vite + Tail
 > 
 > | Platform | Email | Password | Role / Access |
 > | :--- | :--- | :--- | :--- |
-> | **HubSpot CRM** | `complyance.demo@gmail.com` | `Krharsh@123456` | **Super Admin** (Full CRM access to create deals & manage pipeline) |
+> | **HubSpot CRM** | `complyance.demo@gmail.com` | `Krharsh@123456` | 
+** Admin** (Full CRM access to create deals & manage pipeline) |
 > | **Zoho Books** | `complyance.demo@gmail.com` | `Krharsh@12` | **Admin** (Org ID: `60094161014`, Sales Orders & Invoices access) |
 > 
 > #### ⚡ Quick 30-Second Verification Workflow:
